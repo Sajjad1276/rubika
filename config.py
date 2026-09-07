@@ -5,7 +5,7 @@
 # ============================================================
 
 # ─── اطلاعات ربات ────────────────────────────────────────────
-BOT_TOKEN: str = "YOUR_BOT_TOKEN_HERE"
+BOT_TOKEN: str = "CDGDIB0DRBEZCSNTWZBOEORWNYZJTZYPMYDDRZRQYCAMZMPPMLDMDTHVXVPDBFLS"
 
 # ─── شناسه مالک (یوزرنیم بدون @) ────────────────────────────
 # مثال: اگر آدرس روبیکا شما rubika.ir/u/john باشد → "john"
