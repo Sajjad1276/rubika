@@ -1,3 +1,8 @@
-rubika_bot_api==1.2.0 
-orjson 
+rubika_bot_api==1.2.0
+orjson
 jdatetime
+aiodns
+aiofiles
+aiohttp
+pytz
+requests
