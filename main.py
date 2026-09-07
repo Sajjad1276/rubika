@@ -207,7 +207,7 @@ async def on_start(bot_instance, chat_id: str):
 #  هندلر اصلی پیام‌ها
 # ════════════════════════════════════════════════════════════
 
-@bot.on_message(filters=filters.private())
+@bot.on_message(filters=filters.private)
 async def on_message(bot_instance, msg):
     """
     هندلر مرکزی — تمام پیام‌های پرایوت اینجا می‌آیند.
