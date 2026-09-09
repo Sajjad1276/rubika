@@ -1,256 +1,245 @@
 # ============================================================
 #  keyboards.py — تمام کیبوردهای ربات تبادل روبیکا
-#
-#  دو نوع کیبورد:
-#  • ChatKeyboard  → کیبورد پایین صفحه (reply keyboard)
-#  • InlineKeypad  → دکمه‌های زیر پیام (inline keyboard)
-#
-#  قوانین طراحی:
-#  - پنل‌های اصلی → ChatKeyboard
-#  - زیرمنوها، تأییدها، لیست‌ها → InlineKeypad
-#  - هر بخش یک دکمه بازگشت دارد
-#  - button_id ها یکتا و معنادار هستند
+#  کتابخانه: fastrub (fast_rub)
 # ============================================================
 
-from rubika_bot_api.keyboards import ChatKeyboardBuilder, InlineKeyboardBuilder
+from fast_rub.button import KeyPad
 from database import get_text
 
 
 # ════════════════════════════════════════════════════════════
-#  ابزارهای کمکی
+#  ابزارهای کمکی داخلی
 # ════════════════════════════════════════════════════════════
 
+def _btn(text: str, bid: str) -> dict:
+    kp = KeyPad()
+    return kp.simple(bid, text)
+
+
 def _back_btn(target: str = "main") -> dict:
-    """دکمه بازگشت استاندارد."""
-    return InlineKeyboardBuilder.button(
-        text=get_text("back_btn"),
-        button_id=f"back:{target}"
-    )
+    return _btn(get_text("back_btn"), f"back:{target}")
 
 
 def _confirm_btn(action: str, data: str = "") -> dict:
-    return InlineKeyboardBuilder.button(
-        text=get_text("confirm_btn"),
-        button_id=f"confirm:{action}:{data}"
-    )
+    return _btn(get_text("confirm_btn"), f"confirm:{action}:{data}")
 
 
 def _cancel_btn(action: str = "cancel") -> dict:
-    return InlineKeyboardBuilder.button(
-        text=get_text("cancel_btn"),
-        button_id=f"cancel:{action}"
-    )
+    return _btn(get_text("cancel_btn"), f"cancel:{action}")
 
 
-# ════════════════════════════════════════════════════════════
-#  پنل مالک — ChatKeyboard (کیبورد پایین)
-# ════════════════════════════════════════════════════════════
-
-def owner_main_keyboard() -> dict:
-    """کیبورد اصلی پنل مالک."""
-    return (
-        ChatKeyboardBuilder(resize=True, on_time=False)
-        .row("📊 آمار ربات", "👥 مدیریت ادمین‌ها")
-        .row("🕐 برنامه کار", "⚙️ کنترل سیستم")
-        .row("💰 تعرفه‌ها", "✏️ مدیریت متن‌ها")
-        .build()
-    )
-
-
-# ════════════════════════════════════════════════════════════
-#  پنل مالک — زیرمنوهای Inline
-# ════════════════════════════════════════════════════════════
-
-def owner_stats_keyboard() -> dict:
-    """زیرمنوی آمار ربات."""
-    return (
-        InlineKeyboardBuilder()
-        .row(InlineKeyboardBuilder.button(text="📅 آمار امروز",    button_id="stats:today"))
-        .row(InlineKeyboardBuilder.button(text="📆 آمار هفته",     button_id="stats:week"))
-        .row(InlineKeyboardBuilder.button(text="🗓 آمار ماه",      button_id="stats:month"))
-        .row(InlineKeyboardBuilder.button(text="📈 آمار کل",       button_id="stats:all"))
-        .row(_back_btn("owner_main"))
-        .build()
-    )
-
-
-def owner_admin_manage_keyboard() -> dict:
-    """زیرمنوی مدیریت ادمین‌ها."""
-    return (
-        InlineKeyboardBuilder()
-        .row(InlineKeyboardBuilder.button(text="➕ افزودن ادمین",   button_id="admin:add"))
-        .row(InlineKeyboardBuilder.button(text="📋 لیست ادمین‌ها",  button_id="admin:list"))
-        .row(InlineKeyboardBuilder.button(text="📊 آمار ادمین‌ها",  button_id="admin:stats"))
-        .row(_back_btn("owner_main"))
-        .build()
-    )
-
-
-def owner_admin_list_keyboard(admins: list) -> dict:
+def _build_inline(*rows) -> list:
+    """ساخت inline keypad از لیست ردیف‌ها.
+    هر ردیف یک list از dict (خروجی _btn) است.
     """
-    لیست ادمین‌ها با دکمه مدیریت هر کدام.
-    admins: لیست رکوردهای جدول admins
+    kp = KeyPad()
+    for row in rows:
+        if isinstance(row, dict):
+            kp.append(row)
+        else:
+            kp.append(*row)
+    return kp.build()
+
+
+def _build_reply(*rows, resize: bool = True) -> list:
+    """ساخت reply keypad از لیست ردیف‌ها.
+    هر ردیف یک list از رشته‌های متن است.
     """
-    builder = InlineKeyboardBuilder()
+    kp = KeyPad()
+    for row in rows:
+        if isinstance(row, str):
+            kp.append(kp.simple(row, row))
+        else:
+            kp.append(*[kp.simple(t, t) for t in row])
+    return kp.build()
+
+
+# ════════════════════════════════════════════════════════════
+#  پنل مالک — Reply Keyboard (کیبورد پایین صفحه)
+# ════════════════════════════════════════════════════════════
+
+def owner_main_keyboard() -> list:
+    kp = KeyPad()
+    kp.append(kp.simple("📊 آمار ربات", "📊 آمار ربات"),
+              kp.simple("👥 مدیریت ادمین‌ها", "👥 مدیریت ادمین‌ها"))
+    kp.append(kp.simple("🕐 برنامه کار", "🕐 برنامه کار"),
+              kp.simple("⚙️ کنترل سیستم", "⚙️ کنترل سیستم"))
+    kp.append(kp.simple("💰 تعرفه‌ها", "💰 تعرفه‌ها"),
+              kp.simple("✏️ مدیریت متن‌ها", "✏️ مدیریت متن‌ها"))
+    return kp.build()
+
+
+def admin_main_keyboard() -> list:
+    kp = KeyPad()
+    kp.append(kp.simple("📋 صف درخواست‌ها", "📋 صف درخواست‌ها"),
+              kp.simple("📊 ادمین‌های برتر", "📊 ادمین‌های برتر"))
+    kp.append(kp.simple("📝 گزارش روزانه", "📝 گزارش روزانه"),
+              kp.simple("📦 لیست کانال‌هایم", "📦 لیست کانال‌هایم"))
+    return kp.build()
+
+
+def user_main_keyboard() -> list:
+    kp = KeyPad()
+    kp.append(kp.simple("📦 ثبت کانال", "📦 ثبت کانال"),
+              kp.simple("📊 وضعیت درخواست‌ها", "📊 وضعیت درخواست‌ها"))
+    kp.append(kp.simple("👤 پروفایل من", "👤 پروفایل من"),
+              kp.simple("🔗 لینک معرف", "🔗 لینک معرف"))
+    return kp.build()
+
+
+# ════════════════════════════════════════════════════════════
+#  پنل مالک — Inline Keyboards
+# ════════════════════════════════════════════════════════════
+
+def owner_stats_keyboard() -> list:
+    return _build_inline(
+        _btn("📅 آمار امروز",  "stats:today"),
+        _btn("📆 آمار هفته",   "stats:week"),
+        _btn("🗓 آمار ماه",    "stats:month"),
+        _btn("📈 آمار کل",     "stats:all"),
+        _back_btn("owner_main"),
+    )
+
+
+def owner_admin_manage_keyboard() -> list:
+    return _build_inline(
+        _btn("➕ افزودن ادمین",  "admin:add"),
+        _btn("📋 لیست ادمین‌ها", "admin:list"),
+        _btn("📊 آمار ادمین‌ها", "admin:stats"),
+        _back_btn("owner_main"),
+    )
+
+
+def owner_admin_list_keyboard(admins: list) -> list:
+    kp = KeyPad()
     for adm in admins:
-        status_icon = "✅" if adm["is_active"] else "⛔"
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text=f"{status_icon} {adm['display_name']} | {adm['min_members']}-{adm['max_members']} عضو",
-                button_id=f"admin:manage:{adm['admin_id']}"
-            )
-        )
-    builder.row(_back_btn("admin_manage"))
-    return builder.build()
+        icon = "✅" if adm["is_active"] else "⛔"
+        kp.append(kp.simple(
+            f"admin:manage:{adm['admin_id']}",
+            f"{icon} {adm['display_name']} | {adm['min_members']}-{adm['max_members']} عضو"
+        ))
+    kp.append(_back_btn("admin_manage"))
+    return kp.build()
 
 
-def owner_admin_detail_keyboard(admin_id: str, is_active: bool) -> dict:
-    """دکمه‌های مدیریت یک ادمین خاص."""
-    toggle_text = "⛔ تعلیق"   if is_active else "✅ فعال‌سازی"
-    toggle_id   = "admin:suspend" if is_active else "admin:activate"
-    return (
-        InlineKeyboardBuilder()
-        .row(InlineKeyboardBuilder.button(text="📊 آمار فردی",     button_id=f"admin:personal_stats:{admin_id}"))
-        .row(InlineKeyboardBuilder.button(text=toggle_text,          button_id=f"{toggle_id}:{admin_id}"))
-        .row(InlineKeyboardBuilder.button(text="🗑 حذف ادمین",      button_id=f"admin:remove:{admin_id}"))
-        .row(_back_btn("admin:list"))
-        .build()
+def owner_admin_detail_keyboard(admin_id: str, is_active: bool) -> list:
+    toggle_text = "⛔ تعلیق"    if is_active else "✅ فعال‌سازی"
+    toggle_id   = f"admin:suspend:{admin_id}" if is_active else f"admin:activate:{admin_id}"
+    return _build_inline(
+        _btn("📊 آمار فردی",  f"admin:personal_stats:{admin_id}"),
+        _btn(toggle_text,      toggle_id),
+        _btn("🗑 حذف ادمین",  f"admin:remove:{admin_id}"),
+        _back_btn("admin:list"),
     )
 
 
-def owner_confirm_remove_admin_keyboard(admin_id: str) -> dict:
-    """تأیید حذف ادمین."""
-    return (
-        InlineKeyboardBuilder()
-        .row(
-            InlineKeyboardBuilder.button(text="✅ بله، حذف شود", button_id=f"confirm:admin_remove:{admin_id}"),
-            InlineKeyboardBuilder.button(text="❌ خیر",           button_id=f"back:admin:manage:{admin_id}")
-        )
-        .build()
+def owner_confirm_remove_admin_keyboard(admin_id: str) -> list:
+    kp = KeyPad()
+    kp.append(
+        _btn("✅ بله، حذف شود", f"confirm:admin_remove:{admin_id}"),
+        _btn("❌ خیر",           f"back:admin:manage:{admin_id}"),
     )
+    return kp.build()
 
 
-def owner_shift_keyboard(admins: list) -> dict:
-    """مدیریت شیفت کاری ادمین‌ها."""
-    builder = InlineKeyboardBuilder()
+def owner_admin_add_confirm_keyboard() -> list:
+    kp = KeyPad()
+    kp.append(_btn("✅ تأیید و ثبت", "confirm:admin_add"))
+    kp.append(_cancel_btn("admin_add"))
+    return kp.build()
+
+
+def owner_shift_keyboard(admins: list) -> list:
+    kp = KeyPad()
     for adm in admins:
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text=f"🕐 {adm['display_name']} — شیفت: {adm['shift']}",
-                button_id=f"shift:edit:{adm['admin_id']}"
-            )
-        )
-    builder.row(_back_btn("owner_main"))
-    return builder.build()
+        kp.append(kp.simple(
+            f"shift:edit:{adm['admin_id']}",
+            f"🕐 {adm['display_name']} — شیفت: {adm['shift']}"
+        ))
+    kp.append(_back_btn("owner_main"))
+    return kp.build()
 
 
-def owner_shift_select_keyboard(admin_id: str) -> dict:
-    """انتخاب شیفت برای یک ادمین."""
-    return (
-        InlineKeyboardBuilder()
-        .row(InlineKeyboardBuilder.button(text="🌅 صبح",      button_id=f"shift:set:morning:{admin_id}"))
-        .row(InlineKeyboardBuilder.button(text="🌇 عصر",      button_id=f"shift:set:afternoon:{admin_id}"))
-        .row(InlineKeyboardBuilder.button(text="🌙 شب",       button_id=f"shift:set:night:{admin_id}"))
-        .row(InlineKeyboardBuilder.button(text="⏰ تمام وقت", button_id=f"shift:set:fulltime:{admin_id}"))
-        .row(_back_btn("shift"))
-        .build()
+def owner_shift_select_keyboard(admin_id: str) -> list:
+    return _build_inline(
+        _btn("🌅 صبح",      f"shift:set:morning:{admin_id}"),
+        _btn("🌇 عصر",      f"shift:set:afternoon:{admin_id}"),
+        _btn("🌙 شب",       f"shift:set:night:{admin_id}"),
+        _btn("⏰ تمام وقت", f"shift:set:fulltime:{admin_id}"),
+        _back_btn("shift"),
     )
 
 
-def owner_system_keyboard() -> dict:
-    """زیرمنوی کنترل سیستم."""
-    return (
-        InlineKeyboardBuilder()
-        .row(InlineKeyboardBuilder.button(text="🔴 خاموش کردن ربات",  button_id="sys:toggle_bot"))
-        .row(InlineKeyboardBuilder.button(text="📢 پیام همگانی",       button_id="sys:broadcast"))
-        .row(InlineKeyboardBuilder.button(text="🔒 جوین اجباری",       button_id="sys:force_join"))
-        .row(InlineKeyboardBuilder.button(text="⛔ بلاک کاربر",        button_id="sys:block_user"))
-        .row(InlineKeyboardBuilder.button(text="✅ آنبلاک کاربر",      button_id="sys:unblock_user"))
-        .row(InlineKeyboardBuilder.button(text="📋 لاگ سیستم",         button_id="sys:logs"))
-        .row(_back_btn("owner_main"))
-        .build()
+def owner_system_keyboard() -> list:
+    return _build_inline(
+        _btn("🔴 خاموش/روشن ربات", "sys:toggle_bot"),
+        _btn("📢 پیام همگانی",      "sys:broadcast"),
+        _btn("🔒 جوین اجباری",      "sys:force_join"),
+        _btn("⛔ بلاک کاربر",       "sys:block_user"),
+        _btn("✅ آنبلاک کاربر",     "sys:unblock_user"),
+        _btn("📋 لاگ سیستم",        "sys:logs"),
+        _back_btn("owner_main"),
     )
 
 
-def owner_force_join_keyboard(channels: list, is_active: bool) -> dict:
-    """مدیریت جوین اجباری."""
-    builder = InlineKeyboardBuilder()
+def owner_force_join_keyboard(channels: list, is_active: bool) -> list:
+    kp = KeyPad()
     status_text = "🔴 غیرفعال‌کردن" if is_active else "🟢 فعال‌کردن"
-    builder.row(
-        InlineKeyboardBuilder.button(text=status_text, button_id="fj:toggle")
-    )
-    builder.row(
-        InlineKeyboardBuilder.button(text="➕ افزودن کانال", button_id="fj:add")
-    )
+    kp.append(_btn(status_text, "fj:toggle"))
+    kp.append(_btn("➕ افزودن کانال", "fj:add"))
     for ch in channels:
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text=f"🗑 {ch['channel_title'] or ch['channel_username']}",
-                button_id=f"fj:remove:{ch['id']}"
-            )
-        )
-    builder.row(_back_btn("sys"))
-    return builder.build()
+        title = ch.get("channel_title") or ch.get("channel_username", "")
+        kp.append(_btn(f"🗑 {title}", f"fj:remove:{ch['id']}"))
+    kp.append(_back_btn("sys"))
+    return kp.build()
 
 
-def owner_broadcast_target_keyboard() -> dict:
-    """هدف پیام همگانی."""
-    return (
-        InlineKeyboardBuilder()
-        .row(InlineKeyboardBuilder.button(text="👥 همه کاربران",  button_id="bc:target:users"))
-        .row(InlineKeyboardBuilder.button(text="🛡 همه ادمین‌ها", button_id="bc:target:admins"))
-        .row(InlineKeyboardBuilder.button(text="🌐 همه",          button_id="bc:target:all"))
-        .row(_back_btn("sys"))
-        .build()
+def owner_broadcast_target_keyboard() -> list:
+    return _build_inline(
+        _btn("👥 همه کاربران",  "bc:target:users"),
+        _btn("🛡 همه ادمین‌ها", "bc:target:admins"),
+        _btn("🌐 همه",          "bc:target:all"),
+        _back_btn("sys"),
     )
 
 
-def owner_tariff_keyboard(tariffs: list) -> dict:
-    """لیست تعرفه‌ها."""
-    builder = InlineKeyboardBuilder()
+def owner_tariff_keyboard(tariffs: list) -> list:
+    kp = KeyPad()
     for t in tariffs:
         status = "✅" if t["is_active"] else "❌"
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text=f"{status} {t['label']} | {t['min_members']}-{t['max_members']} عضو | {t['price']:,} تومان",
-                button_id=f"tariff:edit:{t['id']}"
-            )
-        )
-    builder.row(InlineKeyboardBuilder.button(text="➕ تعرفه جدید", button_id="tariff:add"))
-    builder.row(_back_btn("owner_main"))
-    return builder.build()
+        label  = t.get("label") or t.get("name", "—")
+        kp.append(kp.simple(
+            f"tariff:edit:{t['id']}",
+            f"{status} {label} | {t['min_members']}-{t['max_members']} عضو | {t['price']:,} تومان"
+        ))
+    kp.append(_btn("➕ تعرفه جدید", "tariff:add"))
+    kp.append(_back_btn("owner_main"))
+    return kp.build()
 
 
-def owner_tariff_detail_keyboard(tariff_id: int, is_active: bool) -> dict:
+def owner_tariff_detail_keyboard(tariff_id: int, is_active: bool) -> list:
     toggle_text = "❌ غیرفعال" if is_active else "✅ فعال"
-    return (
-        InlineKeyboardBuilder()
-        .row(InlineKeyboardBuilder.button(text="✏️ ویرایش قیمت",  button_id=f"tariff:price:{tariff_id}"))
-        .row(InlineKeyboardBuilder.button(text="✏️ ویرایش بازه",  button_id=f"tariff:range:{tariff_id}"))
-        .row(InlineKeyboardBuilder.button(text=toggle_text,         button_id=f"tariff:toggle:{tariff_id}"))
-        .row(InlineKeyboardBuilder.button(text="🗑 حذف",           button_id=f"tariff:delete:{tariff_id}"))
-        .row(_back_btn("tariff"))
-        .build()
+    return _build_inline(
+        _btn("✏️ ویرایش قیمت",  f"tariff:price:{tariff_id}"),
+        _btn("✏️ ویرایش بازه",  f"tariff:range:{tariff_id}"),
+        _btn(toggle_text,         f"tariff:toggle:{tariff_id}"),
+        _btn("🗑 حذف",           f"tariff:delete:{tariff_id}"),
+        _back_btn("tariff"),
     )
 
 
-def owner_texts_category_keyboard() -> dict:
-    """دسته‌بندی متن‌ها برای ویرایش."""
-    return (
-        InlineKeyboardBuilder()
-        .row(InlineKeyboardBuilder.button(text="👤 متن‌های کاربر",    button_id="texts:cat:user"))
-        .row(InlineKeyboardBuilder.button(text="🛡 متن‌های ادمین",    button_id="texts:cat:admin"))
-        .row(InlineKeyboardBuilder.button(text="👑 متن‌های مالک",     button_id="texts:cat:owner"))
-        .row(InlineKeyboardBuilder.button(text="⚙️ متن‌های سیستمی",  button_id="texts:cat:system"))
-        .row(InlineKeyboardBuilder.button(text="🗂 فرمت بایگانی",     button_id="texts:cat:archive"))
-        .row(_back_btn("owner_main"))
-        .build()
+def owner_texts_category_keyboard() -> list:
+    return _build_inline(
+        _btn("👤 متن‌های کاربر",    "texts:cat:user"),
+        _btn("🛡 متن‌های ادمین",    "texts:cat:admin"),
+        _btn("👑 متن‌های مالک",     "texts:cat:owner"),
+        _btn("⚙️ متن‌های سیستمی",  "texts:cat:system"),
+        _btn("🗂 فرمت بایگانی",     "texts:cat:archive"),
+        _back_btn("owner_main"),
     )
 
 
-def owner_texts_list_keyboard(texts: list, category: str) -> dict:
-    """لیست متن‌های یک دسته."""
-    # نگاشت کلیدها به دسته‌ها
+def owner_texts_list_keyboard(texts: list, category: str) -> list:
     cat_map = {
         "user":    ["welcome", "user_menu", "reg_ask_link", "reg_ask_members",
                     "reg_ask_views", "reg_ask_topic", "reg_ask_banner",
@@ -269,337 +258,184 @@ def owner_texts_list_keyboard(texts: list, category: str) -> dict:
         "archive": ["archive_caption"],
     }
     keys_in_cat = cat_map.get(category, [])
-    text_dict = {t["key"]: t for t in texts}
-
-    builder = InlineKeyboardBuilder()
+    text_dict   = {t["key"]: t for t in texts}
+    kp = KeyPad()
     for key in keys_in_cat:
         if key in text_dict:
-            builder.row(
-                InlineKeyboardBuilder.button(
-                    text=f"✏️ {text_dict[key]['description'] or key}",
-                    button_id=f"texts:edit:{key}"
-                )
-            )
-    builder.row(_back_btn("texts"))
-    return builder.build()
+            desc = text_dict[key].get("description") or key
+            kp.append(kp.simple(f"texts:edit:{key}", f"✏️ {desc}"))
+    kp.append(_back_btn("texts"))
+    return kp.build()
 
 
-def owner_text_edit_keyboard(key: str) -> dict:
-    """دکمه‌های ویرایش یک متن خاص."""
-    return (
-        InlineKeyboardBuilder()
-        .row(InlineKeyboardBuilder.button(text="✏️ ویرایش",            button_id=f"texts:do_edit:{key}"))
-        .row(InlineKeyboardBuilder.button(text="↩️ بازگشت به پیش‌فرض", button_id=f"texts:reset:{key}"))
-        .row(_back_btn("texts:cat"))
-        .build()
+def owner_text_edit_keyboard(key: str) -> list:
+    return _build_inline(
+        _btn("✏️ ویرایش",            f"texts:do_edit:{key}"),
+        _btn("↩️ بازگشت به پیش‌فرض", f"texts:reset:{key}"),
+        _back_btn("texts:cat"),
     )
 
 
-def owner_confirm_text_reset_keyboard(key: str) -> dict:
-    return (
-        InlineKeyboardBuilder()
-        .row(
-            InlineKeyboardBuilder.button(text="✅ بله", button_id=f"confirm:text_reset:{key}"),
-            InlineKeyboardBuilder.button(text="❌ خیر", button_id=f"back:texts:edit:{key}")
-        )
-        .build()
+def owner_confirm_text_reset_keyboard(key: str) -> list:
+    kp = KeyPad()
+    kp.append(
+        _btn("✅ بله", f"confirm:text_reset:{key}"),
+        _btn("❌ خیر", f"back:texts:edit:{key}"),
     )
+    return kp.build()
 
 
-# ════════════════════════════════════════════════════════════
-#  پنل ادمین — ChatKeyboard
-# ════════════════════════════════════════════════════════════
-
-def owner_admin_add_confirm_keyboard() -> dict:
-    """تأیید نهایی افزودن ادمین جدید."""
-    return (
-        InlineKeyboardBuilder()
-        .row(InlineKeyboardBuilder.button(
-            text="✅ تأیید و ثبت",
-            button_id="confirm:admin_add"
-        ))
-        .row(_cancel_btn("admin_add"))
-        .build()
+def owner_report_review_keyboard(report_id: int) -> list:
+    kp = KeyPad()
+    kp.append(
+        _btn("✅ تأیید گزارش", f"report:approve:{report_id}"),
+        _btn("❌ رد گزارش",    f"report:reject:{report_id}"),
     )
-
-
-def admin_main_keyboard() -> dict:
-    """کیبورد اصلی پنل ادمین."""
-    return (
-        ChatKeyboardBuilder(resize=True, on_time=False)
-        .row("📋 صف درخواست‌ها", "📊 ادمین‌های برتر")
-        .row("📝 گزارش روزانه", "📦 لیست کانال‌هایم")
-        .build()
-    )
+    return kp.build()
 
 
 # ════════════════════════════════════════════════════════════
-#  پنل ادمین — زیرمنوهای Inline
+#  پنل ادمین — Inline Keyboards
 # ════════════════════════════════════════════════════════════
 
-def admin_queue_keyboard(queue_items: list) -> dict:
-    """
-    نمایش صف درخواست‌های ادمین.
-    اولین آیتم = در حال بررسی، بقیه = در انتظار.
-    """
-    builder = InlineKeyboardBuilder()
+def admin_queue_keyboard(queue_items: list) -> list:
+    kp = KeyPad()
     for i, item in enumerate(queue_items):
-        if i == 0:
-            prefix = "🔵 در حال بررسی"
-        else:
-            prefix = f"⏳ انتظار ({i + 1})"
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text=f"{prefix} | {item['channel_link']} | {item['member_count']} عضو",
-                button_id=f"queue:view:{item['id']}"
-            )
-        )
-    builder.row(_back_btn("admin_main"))
-    return builder.build()
+        prefix = "🔵 در حال بررسی" if i == 0 else f"⏳ انتظار ({i + 1})"
+        link   = item.get("channel_link") or item.get("channel_username", "—")
+        kp.append(kp.simple(
+            f"queue:view:{item['id']}",
+            f"{prefix} | {link} | {item['member_count']} عضو"
+        ))
+    kp.append(_back_btn("admin_main"))
+    return kp.build()
 
 
-def admin_request_detail_keyboard(channel_id: int, admin_joined: bool,
-                                   admin_promoted: bool) -> dict:
-    """
-    دکمه‌های مدیریت یک درخواست در صف.
-    مراحل به ترتیب نمایش داده می‌شوند.
-    """
-    builder = InlineKeyboardBuilder()
-
+def admin_request_detail_keyboard(channel_id: int,
+                                   admin_joined: bool,
+                                   admin_promoted: bool) -> list:
+    kp = KeyPad()
     if not admin_joined:
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text="✅ عضو کانال شدم",
-                button_id=f"req:joined:{channel_id}"
-            )
-        )
+        kp.append(_btn("✅ عضو کانال شدم", f"req:joined:{channel_id}"))
     elif not admin_promoted:
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text="⏳ در انتظار ادمین شدن توسط مالک...",
-                button_id=f"req:waiting_promote:{channel_id}"
-            )
-        )
+        kp.append(_btn("⏳ در انتظار ادمین شدن...", f"req:waiting_promote:{channel_id}"))
     else:
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text="✅ تأیید نهایی — ارسال به بایگانی",
-                button_id=f"req:approve:{channel_id}"
-            )
-        )
-
-    builder.row(
-        InlineKeyboardBuilder.button(
-            text="❌ رد درخواست",
-            button_id=f"req:reject:{channel_id}"
-        )
-    )
-    builder.row(_back_btn("queue"))
-    return builder.build()
+        kp.append(_btn("✅ تأیید نهایی — ارسال به بایگانی", f"req:approve:{channel_id}"))
+    kp.append(_btn("❌ رد درخواست", f"req:reject:{channel_id}"))
+    kp.append(_back_btn("queue"))
+    return kp.build()
 
 
-def admin_reject_reason_keyboard(channel_id: int) -> dict:
-    """انتخاب دلیل رد درخواست."""
+def admin_reject_reason_keyboard(channel_id: int) -> list:
     reasons = [
-        ("آمار نادرست",        "wrong_stats"),
-        ("کانال غیرفعال",      "inactive"),
-        ("موضوع نامناسب",      "bad_topic"),
-        ("لینک نامعتبر",       "invalid_link"),
-        ("سایر",               "other"),
+        ("آمار نادرست",  "wrong_stats"),
+        ("کانال غیرفعال","inactive"),
+        ("موضوع نامناسب","bad_topic"),
+        ("لینک نامعتبر", "invalid_link"),
+        ("سایر",         "other"),
     ]
-    builder = InlineKeyboardBuilder()
-    for text, reason_id in reasons:
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text=text,
-                button_id=f"req:reject_reason:{channel_id}:{reason_id}"
-            )
-        )
-    builder.row(_back_btn(f"queue:view:{channel_id}"))
-    return builder.build()
+    kp = KeyPad()
+    for text, rid in reasons:
+        kp.append(kp.simple(f"req:reject_reason:{channel_id}:{rid}", text))
+    kp.append(_back_btn(f"queue:view:{channel_id}"))
+    return kp.build()
 
 
-def admin_channel_list_keyboard(channels: list) -> dict:
-    """لیست کانال‌های ثبت‌شده توسط ادمین."""
-    builder = InlineKeyboardBuilder()
+def admin_channel_list_keyboard(channels: list) -> list:
+    kp = KeyPad()
     for ch in channels:
-        warn_icon = "⚠️" if ch["warning_count"] > 0 else "✅"
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text=f"{warn_icon} {ch['registration_code']} | {ch['channel_link']} | {ch['member_count']} عضو",
-                button_id=f"ch:manage:{ch['id']}"
-            )
-        )
-    builder.row(_back_btn("admin_main"))
-    return builder.build()
+        warn_icon = "⚠️" if ch.get("warning_count", 0) > 0 else "✅"
+        code = ch.get("registration_code", "—")
+        link = ch.get("channel_link", "—")
+        members = ch.get("member_count", 0)
+        kp.append(kp.simple(
+            f"ch:manage:{ch['id']}",
+            f"{warn_icon} {code} | {link} | {members} عضو"
+        ))
+    kp.append(_back_btn("admin_main"))
+    return kp.build()
 
 
-def admin_channel_detail_keyboard(channel_id: int, warning_count: int) -> dict:
-    """مدیریت یک کانال از لیست ادمین."""
-    builder = InlineKeyboardBuilder()
+def admin_channel_detail_keyboard(channel_id: int, warning_count: int) -> list:
+    kp = KeyPad()
     if warning_count == 0:
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text="⚠️ اخطار سطح ۱",
-                button_id=f"ch:warn:1:{channel_id}"
-            )
-        )
+        kp.append(_btn("⚠️ اخطار سطح ۱", f"ch:warn:1:{channel_id}"))
     elif warning_count == 1:
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text="🔴 اخطار سطح ۲",
-                button_id=f"ch:warn:2:{channel_id}"
-            )
-        )
-    builder.row(
-        InlineKeyboardBuilder.button(
-            text="🗑 حذف از لیست",
-            button_id=f"ch:remove:{channel_id}"
-        )
-    )
-    builder.row(
-        InlineKeyboardBuilder.button(
-            text="📋 تاریخچه اخطارها",
-            button_id=f"ch:warn_history:{channel_id}"
-        )
-    )
-    builder.row(_back_btn("ch:list"))
-    return builder.build()
+        kp.append(_btn("🔴 اخطار سطح ۲", f"ch:warn:2:{channel_id}"))
+    kp.append(_btn("🗑 حذف از لیست",     f"ch:remove:{channel_id}"))
+    kp.append(_btn("📋 تاریخچه اخطارها", f"ch:warn_history:{channel_id}"))
+    kp.append(_back_btn("ch:list"))
+    return kp.build()
 
 
-def admin_warning_reason_keyboard(channel_id: int, level: int) -> dict:
-    """انتخاب دلیل اخطار."""
+def admin_warning_reason_keyboard(channel_id: int, level: int) -> list:
     reasons = [
-        ("عدم تبادل به موقع",  "no_exchange"),
-        ("کاهش آمار",          "stats_drop"),
-        ("عدم پاسخگویی",       "no_response"),
-        ("نقض قوانین",         "rule_break"),
-        ("سایر",               "other"),
+        ("عدم تبادل به موقع", "no_exchange"),
+        ("کاهش آمار",         "stats_drop"),
+        ("عدم پاسخگویی",      "no_response"),
+        ("نقض قوانین",        "rule_break"),
+        ("سایر",              "other"),
     ]
-    builder = InlineKeyboardBuilder()
-    for text, reason_id in reasons:
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text=text,
-                button_id=f"ch:warn_reason:{channel_id}:{level}:{reason_id}"
-            )
-        )
-    builder.row(_back_btn(f"ch:manage:{channel_id}"))
-    return builder.build()
+    kp = KeyPad()
+    for text, rid in reasons:
+        kp.append(kp.simple(f"ch:warn_reason:{channel_id}:{level}:{rid}", text))
+    kp.append(_back_btn(f"ch:manage:{channel_id}"))
+    return kp.build()
 
 
-def admin_confirm_remove_channel_keyboard(channel_id: int) -> dict:
-    """تأیید حذف کانال از لیست."""
-    return (
-        InlineKeyboardBuilder()
-        .row(
-            InlineKeyboardBuilder.button(
-                text="✅ بله، حذف شود",
-                button_id=f"confirm:ch_remove:{channel_id}"
-            ),
-            InlineKeyboardBuilder.button(
-                text="❌ خیر",
-                button_id=f"back:ch:manage:{channel_id}"
-            )
-        )
-        .build()
+def admin_confirm_remove_channel_keyboard(channel_id: int) -> list:
+    kp = KeyPad()
+    kp.append(
+        _btn("✅ بله، حذف شود", f"confirm:ch_remove:{channel_id}"),
+        _btn("❌ خیر",           f"back:ch:manage:{channel_id}"),
+    )
+    return kp.build()
+
+
+def admin_leaderboard_period_keyboard() -> list:
+    return _build_inline(
+        _btn("📅 امروز", "lb:today"),
+        _btn("📆 هفته",  "lb:week"),
+        _btn("🗓 ماه",   "lb:month"),
+        _back_btn("admin_main"),
     )
 
 
-def admin_leaderboard_period_keyboard() -> dict:
-    """انتخاب بازه زمانی رنکینگ."""
-    return (
-        InlineKeyboardBuilder()
-        .row(InlineKeyboardBuilder.button(text="📅 امروز",  button_id="lb:today"))
-        .row(InlineKeyboardBuilder.button(text="📆 هفته",   button_id="lb:week"))
-        .row(InlineKeyboardBuilder.button(text="🗓 ماه",    button_id="lb:month"))
-        .row(_back_btn("admin_main"))
-        .build()
-    )
-
-
-def admin_report_confirm_keyboard() -> dict:
-    """تأیید ارسال گزارش روزانه."""
-    return (
-        InlineKeyboardBuilder()
-        .row(
-            _confirm_btn("report"),
-            _cancel_btn("report")
-        )
-        .build()
-    )
-
-
-def owner_report_review_keyboard(report_id: int) -> dict:
-    """بررسی گزارش ادمین توسط مالک."""
-    return (
-        InlineKeyboardBuilder()
-        .row(
-            InlineKeyboardBuilder.button(
-                text="✅ تأیید گزارش",
-                button_id=f"report:approve:{report_id}"
-            ),
-            InlineKeyboardBuilder.button(
-                text="❌ رد گزارش",
-                button_id=f"report:reject:{report_id}"
-            )
-        )
-        .build()
-    )
+def admin_report_confirm_keyboard() -> list:
+    kp = KeyPad()
+    kp.append(_confirm_btn("report"), _cancel_btn("report"))
+    return kp.build()
 
 
 # ════════════════════════════════════════════════════════════
-#  پنل کاربر — ChatKeyboard
+#  پنل کاربر — Inline Keyboards
 # ════════════════════════════════════════════════════════════
 
-def user_main_keyboard() -> dict:
-    """کیبورد اصلی پنل کاربر."""
-    return (
-        ChatKeyboardBuilder(resize=True, on_time=False)
-        .row("📦 ثبت کانال", "📊 وضعیت درخواست‌ها")
-        .row("👤 پروفایل من", "🔗 لینک معرف")
-        .build()
-    )
-
-
-# ════════════════════════════════════════════════════════════
-#  پنل کاربر — زیرمنوهای Inline
-# ════════════════════════════════════════════════════════════
-
-def user_topic_keyboard(topics: list) -> dict:
-    """انتخاب موضوع کانال."""
-    builder = InlineKeyboardBuilder()
+def user_topic_keyboard(topics: list) -> list:
+    kp = KeyPad()
     for topic in topics:
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text=topic["title"],
-                button_id=f"topic:{topic['id']}"
-            )
-        )
-    builder.row(_cancel_btn("reg"))
-    return builder.build()
+        # topic می‌تواند dict یا رشته باشد
+        if isinstance(topic, dict):
+            title = topic.get("title", str(topic))
+            tid   = topic.get("id", title)
+        else:
+            title = str(topic)
+            tid   = title
+        kp.append(kp.simple(f"topic:{tid}", title))
+    kp.append(_cancel_btn("reg"))
+    return kp.build()
 
 
-def user_reg_confirm_keyboard(channel_id_temp: str) -> dict:
-    """تأیید نهایی ثبت کانال."""
-    return (
-        InlineKeyboardBuilder()
-        .row(
-            InlineKeyboardBuilder.button(
-                text="✅ تأیید و ارسال",
-                button_id=f"reg:confirm:{channel_id_temp}"
-            ),
-            InlineKeyboardBuilder.button(
-                text="❌ لغو",
-                button_id="cancel:reg"
-            )
-        )
-        .build()
+def user_reg_confirm_keyboard(channel_id_temp: str) -> list:
+    kp = KeyPad()
+    kp.append(
+        _btn("✅ تأیید و ارسال", f"reg:confirm:{channel_id_temp}"),
+        _btn("❌ لغو",            "cancel:reg"),
     )
+    return kp.build()
 
 
-def user_requests_keyboard(channels: list) -> dict:
-    """وضعیت درخواست‌های کاربر."""
+def user_requests_keyboard(channels: list) -> list:
     status_icons = {
         "pending":       "🟡",
         "admin_joined":  "🔵",
@@ -609,93 +445,54 @@ def user_requests_keyboard(channels: list) -> dict:
         "rejected":      "❌",
         "cancelled":     "⛔",
     }
-    builder = InlineKeyboardBuilder()
+    kp = KeyPad()
     for ch in channels:
-        icon = status_icons.get(ch["status"], "❓")
-        # نام ادمین مسئول در دکمه نمایش داده می‌شود
+        icon       = status_icons.get(ch.get("status", ""), "❓")
+        code       = ch.get("registration_code", "—")
+        link       = ch.get("channel_link", "—")
         admin_part = f" | @{ch['admin_username']}" if ch.get("admin_username") else ""
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text=f"{icon} {ch['registration_code']} — {ch['channel_link']}{admin_part}",
-                button_id=f"req:status:{ch['id']}"
-            )
-        )
-    builder.row(_back_btn("user_main"))
-    return builder.build()
+        kp.append(kp.simple(
+            f"req:status:{ch['id']}",
+            f"{icon} {code} — {link}{admin_part}"
+        ))
+    kp.append(_back_btn("user_main"))
+    return kp.build()
 
 
-def user_request_detail_keyboard(channel_id: int) -> dict:
-    """جزئیات یک درخواست از دید کاربر."""
-    return (
-        InlineKeyboardBuilder()
-        .row(
-            InlineKeyboardBuilder.button(
-                text="🗑 لغو درخواست",
-                button_id=f"req:cancel:{channel_id}"
-            )
-        )
-        .row(_back_btn("req:list"))
-        .build()
+def user_request_detail_keyboard(channel_id: int) -> list:
+    return _build_inline(
+        _btn("🗑 لغو درخواست", f"req:cancel:{channel_id}"),
+        _back_btn("req:list"),
     )
 
 
-def user_confirm_cancel_request_keyboard(channel_id: int) -> dict:
-    """تأیید لغو درخواست."""
-    return (
-        InlineKeyboardBuilder()
-        .row(
-            InlineKeyboardBuilder.button(
-                text="✅ بله، لغو شود",
-                button_id=f"confirm:req_cancel:{channel_id}"
-            ),
-            InlineKeyboardBuilder.button(
-                text="❌ خیر",
-                button_id=f"back:req:status:{channel_id}"
-            )
-        )
-        .build()
+def user_confirm_cancel_request_keyboard(channel_id: int) -> list:
+    kp = KeyPad()
+    kp.append(
+        _btn("✅ بله، لغو شود", f"confirm:req_cancel:{channel_id}"),
+        _btn("❌ خیر",           f"back:req:status:{channel_id}"),
     )
+    return kp.build()
 
 
 # ════════════════════════════════════════════════════════════
 #  جوین اجباری
 # ════════════════════════════════════════════════════════════
 
-def force_join_keyboard(channels: list) -> dict:
-    """
-    نمایش کانال‌های اجباری با لینک.
-    channels: لیست رکوردهای forced_joins
-    """
-    builder = InlineKeyboardBuilder()
+def force_join_keyboard(channels: list) -> list:
+    kp = KeyPad()
     for ch in channels:
-        builder.row(
-            InlineKeyboardBuilder.button(
-                text=f"📢 {ch['channel_title'] or ch['channel_username']}",
-                button_id=f"fj:open:{ch['channel_username']}"
-            )
-        )
-    builder.row(
-        InlineKeyboardBuilder.button(
-            text=get_text("force_join_btn"),
-            button_id="fj:check"
-        )
-    )
-    return builder.build()
+        title = ch.get("channel_title") or ch.get("channel_username", "کانال")
+        kp.append(kp.simple(f"fj:open:{ch['channel_username']}", f"📢 {title}"))
+    kp.append(_btn(get_text("force_join_btn"), "fj:check"))
+    return kp.build()
 
 
 # ════════════════════════════════════════════════════════════
-#  ابزار: ساخت پیام تأیید ادمین شدن برای مالک
+#  تأیید ادمین شدن (مالک)
 # ════════════════════════════════════════════════════════════
 
-def owner_promote_confirm_keyboard(channel_id: int) -> dict:
-    """دکمه تأیید ادمین شدن توسط مالک."""
-    return (
-        InlineKeyboardBuilder()
-        .row(
-            InlineKeyboardBuilder.button(
-                text="✅ ادمین کردم",
-                button_id=f"promote:done:{channel_id}"
-            )
-        )
-        .build()
+def owner_promote_confirm_keyboard(channel_id: int) -> list:
+    return _build_inline(
+        _btn("✅ ادمین کردم", f"promote:done:{channel_id}"),
     )
