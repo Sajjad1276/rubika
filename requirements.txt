@@ -6,3 +6,5 @@ aiofiles
 aiohttp
 pytz
 requests
+fastrub
+jdatetime
