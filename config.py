@@ -9,13 +9,10 @@ import os
 BOT_TOKEN: str = "CDGDIB0DRBEZCSNTWZBOEORWNYZJTZYPMYDDRZRQYCAMZMPPMLDMDTHVXVPDBFLS"
 
 # شناسه یکتای مالک. این مقدار از یوزرنیم امن‌تر است.
-OWNER_ID: str = os.getenv("RUBIKA_OWNER_ID", "").strip()
+OWNER_ID: str = "u0K1o2Z0ff9ec28fc4383d4c6909c676".strip()
 
 # یوزرنیم مالک برای سازگاری با نسخه قبلی.
-OWNER_USERNAME: str = os.getenv(
-    "RUBIKA_OWNER_USERNAME",
-    "owner_username_here",
-).strip().lstrip("@")
+OWNER_USERNAME: str = "mizanup".strip().lstrip("@")
 
 
 # ─── دیتابیس و لاگ ──────────────────────────────────────────
