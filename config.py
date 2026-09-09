@@ -6,7 +6,7 @@ import os
 
 
 # ─── اطلاعات ربات ────────────────────────────────────────────
-BOT_TOKEN: str = "CDGDIB0DRBEZCSNTWZBOEORWNYZJTZYPMYDDRZRQYCAMZMPPMLDMDTHVXVPDBFLS"
+BOT_TOKEN: str = os.getenv("RUBIKA_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 
 # شناسه یکتای مالک. این مقدار از یوزرنیم امن‌تر است.
 OWNER_ID: str = os.getenv("RUBIKA_OWNER_ID", "").strip()
