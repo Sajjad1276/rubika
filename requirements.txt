@@ -1,9 +1,6 @@
-orjson
-jdatetime
-aiodns
-aiofiles
-aiohttp
-pytz
-requests
 fastrub==6.1.1
-
+websockets
+mutagen
+filetype
+pycryptodome
+pillow
