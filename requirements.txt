@@ -6,7 +6,7 @@ aiofiles
 aiohttp
 pytz
 requests
-fastrub
+fast_rub
 jdatetime
 websockets>=12.0
 
