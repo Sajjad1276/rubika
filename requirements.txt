@@ -4,3 +4,4 @@ mutagen
 filetype
 pycryptodome
 pillow
+urllib3
