@@ -1565,6 +1565,12 @@ async def _do_broadcast(user_id: str, text: str, target: str):
 
 async def main():
     logger.info(f"ربات تبادل نسخه {config.BOT_VERSION} در حال راه‌اندازی...")
+    # workaround: start() فلگ‌ها را ریست می‌کند؛ بعد از start دوباره ست می‌کنیم
+    await bot.start()
+    if bot._message_handlers_polling:
+        bot._fetch_messages_polling = True
+    if bot._button_handlers:
+        bot._fetch_buttons = True
     await bot.run()
 
 if __name__ == "__main__":
