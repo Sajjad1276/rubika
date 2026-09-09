@@ -1,4 +1,3 @@
-rubika_bot_api==1.2.0
 orjson
 jdatetime
 aiodns
@@ -6,7 +5,5 @@ aiofiles
 aiohttp
 pytz
 requests
-fast_rub
-jdatetime
-websockets>=12.0
+fastrub==6.1.1
 
