@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 token = os.environ.get("BOT_TOKEN", BOT_TOKEN)
 owner_username = os.environ.get("OWNER_USERNAME", OWNER_USERNAME)
 
-bot = Client(token)
+bot = Client(name_session="rubika_exchange_bot", token=token)
 db.init_db()
 logger.info("دیتابیس آماده شد.")
 
