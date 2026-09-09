@@ -6,12 +6,12 @@
 
 import sqlite3
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 
 from config import (
     DATABASE_FILE, DEFAULT_MAX_CHANNELS_PER_ADMIN,
-    DEFAULT_TOPICS, ChannelStatus
+    DEFAULT_TOPICS, ChannelStatus, WarningLevel
 )
 
 logger = logging.getLogger(__name__)
@@ -416,6 +416,20 @@ def _seed_settings(conn: sqlite3.Connection) -> None:
 #  توابع عمومی
 # ════════════════════════════════════════════════════════════
 
+def bump_setting_counter(key: str) -> int:
+    """افزایش یک شمارنده عددی در تنظیمات و بازگرداندن مقدار جدید."""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        current = int(row["value"]) if row and str(row["value"]).lstrip("-").isdigit() else 0
+        current += 1
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(current)))
+        conn.commit()
+        return current
+    finally:
+        conn.close()
+
+
 def get_text(key: str, **kwargs) -> str:
     """
     دریافت متن از دیتابیس و جایگزینی متغیرها.
@@ -509,6 +523,24 @@ def get_or_create_user(user_id: str, username: str = None,
         conn.commit()
     conn.close()
     return row
+
+
+def set_user_role(user_id: str, role: str) -> bool:
+    conn = get_conn()
+    try:
+        cur = conn.execute("UPDATE users SET role=? WHERE user_id=?", (role, str(user_id)))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_user_by_referral_code(code: str) -> Optional[sqlite3.Row]:
+    conn = get_conn()
+    try:
+        return conn.execute("SELECT * FROM users WHERE referral_code=?", (code,)).fetchone()
+    finally:
+        conn.close()
 
 
 def get_user(user_id: str) -> Optional[sqlite3.Row]:
@@ -781,6 +813,18 @@ def create_channel_request(channel_link: str, channel_name: str,
         conn.close()
 
 
+def is_channel_admin(channel_id: int, admin_id: str) -> bool:
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM channels WHERE id=? AND assigned_admin_id=? AND status NOT IN ('rejected','cancelled')",
+            (channel_id, str(admin_id)),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def get_channel(channel_id: int) -> Optional[sqlite3.Row]:
     conn = get_conn()
     row = conn.execute("SELECT * FROM channels WHERE id=?", (channel_id,)).fetchone()
@@ -803,7 +847,7 @@ def get_user_channels(user_id: str) -> list[sqlite3.Row]:
     rows = conn.execute("""
         SELECT c.*, a.username AS admin_username, a.display_name AS admin_name
         FROM channels c
-        JOIN admins a ON c.assigned_admin_id = a.admin_id
+        LEFT JOIN admins a ON c.assigned_admin_id = a.admin_id
         WHERE c.owner_user_id = ?
         ORDER BY c.registered_at DESC
     """, (user_id,)).fetchall()
@@ -855,6 +899,7 @@ def update_channel_status(channel_id: int, status: str,
                            actor_id: str, reason: str = None) -> None:
     conn = get_conn()
     now = datetime.now().isoformat()
+    updates = {"status": status}
 
     if status == ChannelStatus.ADMIN_JOINED:
         conn.execute(
@@ -862,8 +907,9 @@ def update_channel_status(channel_id: int, status: str,
             (status, channel_id)
         )
     elif status == ChannelStatus.WAITING_OWNER:
+        # ادمین در کانال join کرده و منتظر promote شدن توسط مالک است
         conn.execute(
-            "UPDATE channels SET admin_promoted=0, status=? WHERE id=?",
+            "UPDATE channels SET admin_promoted=1, status=? WHERE id=?",
             (status, channel_id)
         )
     elif status == ChannelStatus.CONFIRMED:
@@ -892,8 +938,24 @@ def update_channel_status(channel_id: int, status: str,
         """, (status, now, reason, channel_id))
         # از صف خارج کن
         conn.execute(
-            "DELETE FROM queue WHERE channel_id=? AND is_active=1", (channel_id,)
+            "UPDATE queue SET is_active=0 WHERE channel_id=? AND is_active=1",
+            (channel_id,)
         )
+
+    elif status == ChannelStatus.CANCELLED:
+        conn.execute(
+            "UPDATE channels SET status=?, rejected_at=? WHERE id=?",
+            (status, now, channel_id)
+        )
+        # از صف خارج کن
+        conn.execute(
+            "UPDATE queue SET is_active=0 WHERE channel_id=? AND is_active=1",
+            (channel_id,)
+        )
+
+    else:
+        # هر وضعیت دیگری فقط status را به‌روز می‌کند
+        conn.execute("UPDATE channels SET status=? WHERE id=?", (status, channel_id))
 
     conn.commit()
     log_event(conn, f"channel_{status}", actor_id, str(channel_id), reason)
@@ -958,14 +1020,16 @@ def get_active_forced_joins() -> list[sqlite3.Row]:
     return rows
 
 
-def add_forced_join(channel_id: str, username: str, title: str) -> None:
+def add_forced_join(channel_id: str, username: str, title: str) -> bool:
     conn = get_conn()
     conn.execute("""
         INSERT OR IGNORE INTO forced_joins (channel_id, channel_username, channel_title)
         VALUES (?,?,?)
     """, (channel_id, username, title))
+    changed = conn.total_changes > 0
     conn.commit()
     conn.close()
+    return changed
 
 
 def remove_forced_join(fj_id: int) -> None:
@@ -1054,3 +1118,90 @@ def log_event(conn: sqlite3.Connection, event_type: str,
         conn.commit()
     except Exception as e:
         logger.warning(f"خطا در ثبت لاگ: {e}")
+
+
+# ════════════════════════════════════════════════════════════
+#  توابع تکمیلی مورد نیاز پنل مالک
+# ════════════════════════════════════════════════════════════
+
+def get_admin_personal_stats(admin_id: str) -> dict:
+    conn = get_conn()
+    try:
+        row = conn.execute("""
+            SELECT
+                COUNT(CASE WHEN status='archived' THEN 1 END) AS registered_count,
+                COUNT(CASE WHEN status='rejected' THEN 1 END) AS rejected_count,
+                COUNT(CASE WHEN status IN ('pending','admin_joined','waiting_owner','confirmed') THEN 1 END) AS active_count,
+                COALESCE(SUM(warning_count), 0) AS warning_count
+            FROM channels WHERE assigned_admin_id=?
+        """, (str(admin_id),)).fetchone()
+        admin = conn.execute("SELECT total_referrals, total_registered FROM admins WHERE admin_id=?", (str(admin_id),)).fetchone()
+        return {
+            "registered_count": row["registered_count"] or 0,
+            "rejected_count": row["rejected_count"] or 0,
+            "active_count": row["active_count"] or 0,
+            "warning_count": row["warning_count"] or 0,
+            "total_referrals": admin["total_referrals"] if admin else 0,
+            "total_registered": admin["total_registered"] if admin else 0,
+        }
+    finally:
+        conn.close()
+
+
+def get_daily_report(report_id: int) -> Optional[sqlite3.Row]:
+    conn = get_conn()
+    try:
+        return conn.execute("SELECT * FROM daily_reports WHERE id=?", (report_id,)).fetchone()
+    finally:
+        conn.close()
+
+
+def get_tariff(tariff_id: int) -> Optional[sqlite3.Row]:
+    conn = get_conn()
+    try:
+        return conn.execute("SELECT * FROM tariffs WHERE id=?", (tariff_id,)).fetchone()
+    finally:
+        conn.close()
+
+
+def update_tariff_price(tariff_id: int, price: int) -> bool:
+    conn = get_conn()
+    try:
+        cur = conn.execute("UPDATE tariffs SET price=?, updated_at=datetime('now') WHERE id=?", (int(price), int(tariff_id)))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def update_tariff_range(tariff_id: int, min_members: int, max_members: int) -> bool:
+    if int(min_members) > int(max_members):
+        return False
+    conn = get_conn()
+    try:
+        cur = conn.execute("UPDATE tariffs SET min_members=?, max_members=?, updated_at=datetime('now') WHERE id=?", (int(min_members), int(max_members), int(tariff_id)))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_tariff(tariff_id: int) -> bool:
+    conn = get_conn()
+    try:
+        cur = conn.execute("DELETE FROM tariffs WHERE id=?", (int(tariff_id),))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def set_max_channels_per_admin(value: int) -> None:
+    value = max(1, int(value))
+    set_setting("max_channels_per_admin", str(value))
+    conn = get_conn()
+    try:
+        conn.execute("UPDATE admins SET max_channels=? WHERE max_channels IS NULL OR max_channels > ?", (value, value))
+        conn.commit()
+    finally:
+        conn.close()
