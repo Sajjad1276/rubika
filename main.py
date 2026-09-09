@@ -1565,7 +1565,6 @@ async def _do_broadcast(user_id: str, text: str, target: str):
 
 async def main():
     logger.info(f"ربات تبادل نسخه {config.BOT_VERSION} در حال راه‌اندازی...")
-    await bot.start()
     await bot.run()
 
 if __name__ == "__main__":
