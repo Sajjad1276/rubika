@@ -1,109 +1,120 @@
 # ============================================================
-#  config.py — تنظیمات مرکزی ربات تبادل روبیکا
-#  هیچ مقدار حساسی نباید مستقیم در کد باشد؛
-#  توکن و یوزرنیم مالک اینجا تنظیم می‌شوند.
+# config.py — تنظیمات مرکزی ربات تبادل روبیکا
 # ============================================================
+
+import os
+
 
 # ─── اطلاعات ربات ────────────────────────────────────────────
-BOT_TOKEN: str = "CDGDIB0DRBEZCSNTWZBOEORWNYZJTZYPMYDDRZRQYCAMZMPPMLDMDTHVXVPDBFLS"
+BOT_TOKEN: str = os.getenv("RUBIKA_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 
-# ─── شناسه مالک (یوزرنیم بدون @) ────────────────────────────
-# مثال: اگر آدرس روبیکا شما rubika.ir/u/john باشد → "john"
-OWNER_USERNAME: str = "owner_username_here"
+# شناسه یکتای مالک. این مقدار از یوزرنیم امن‌تر است.
+OWNER_ID: str = os.getenv("RUBIKA_OWNER_ID", "").strip()
 
-# ─── نام فایل دیتابیس ────────────────────────────────────────
-DATABASE_FILE: str = "bot.db"
+# یوزرنیم مالک برای سازگاری با نسخه قبلی.
+OWNER_USERNAME: str = os.getenv(
+    "RUBIKA_OWNER_USERNAME",
+    "owner_username_here",
+).strip().lstrip("@")
 
-# ─── حداکثر کانال برای هر ادمین (پیش‌فرض) ───────────────────
-# مالک می‌تواند این مقدار را از پنل تغییر دهد
-DEFAULT_MAX_CHANNELS_PER_ADMIN: int = 40
 
-# ─── مدت زمان اعتبار اخطار (روز) ────────────────────────────
-DEFAULT_WARNING_EXPIRE_DAYS: int = 7
+# ─── دیتابیس و لاگ ──────────────────────────────────────────
+DATABASE_FILE: str = os.getenv("RUBIKA_DATABASE_FILE", "bot.db")
+LOG_LEVEL: str = os.getenv("RUBIKA_LOG_LEVEL", "INFO").upper()
+LOG_TO_FILE: bool = os.getenv("RUBIKA_LOG_TO_FILE", "1") == "1"
+LOG_FILE: str = os.getenv("RUBIKA_LOG_FILE", "bot.log")
 
-# ─── حداکثر زمان انتظار ادمین روی یک درخواست (دقیقه) ────────
-# اگر ادمین بیشتر از این مقدار روی یک درخواست بماند → اخطار
-ADMIN_REQUEST_TIMEOUT_MINUTES: int = 30
 
-# ─── نسخه ربات ───────────────────────────────────────────────
-BOT_VERSION: str = "1.0.0"
+# ─── محدودیت‌ها ─────────────────────────────────────────────
+DEFAULT_MAX_CHANNELS_PER_ADMIN: int = int(
+    os.getenv("MAX_CHANNELS_PER_ADMIN", "40")
+)
+DEFAULT_WARNING_EXPIRE_DAYS: int = int(
+    os.getenv("WARNING_EXPIRE_DAYS", "7")
+)
+ADMIN_REQUEST_TIMEOUT_MINUTES: int = int(
+    os.getenv("ADMIN_REQUEST_TIMEOUT_MINUTES", "30")
+)
 
-# ─── تنظیمات لاگ ─────────────────────────────────────────────
-LOG_LEVEL: str = "INFO"           # DEBUG | INFO | WARNING | ERROR
-LOG_TO_FILE: bool = True
-LOG_FILE: str = "bot.log"
+BOT_VERSION: str = "1.1.0"
 
-# ============================================================
-#  ثوابت داخلی — تغییر ندهید مگر بدانید چه می‌کنید
-# ============================================================
 
-# وضعیت‌های ممکن برای یک درخواست کانال
+# ════════════════════════════════════════════════════════════
+# وضعیت درخواست کانال
+# ════════════════════════════════════════════════════════════
+
 class ChannelStatus:
-    PENDING         = "pending"           # در انتظار اقدام ادمین
-    ADMIN_JOINED    = "admin_joined"      # ادمین عضو شده، هنوز ادمین نشده
-    WAITING_OWNER   = "waiting_owner"     # در انتظار تأیید ادمین شدن توسط مالک
-    CONFIRMED       = "confirmed"         # تأیید شده — بنر ارسال خواهد شد
-    ARCHIVED        = "archived"          # بنر ارسال شد، ثبت کامل است
-    REJECTED        = "rejected"          # رد شده
-    CANCELLED       = "cancelled"         # لغو شده توسط کاربر
+    PENDING = "pending"
+    ADMIN_JOINED = "admin_joined"
+    WAITING_OWNER = "waiting_owner"
+    CONFIRMED = "confirmed"
+    ARCHIVED = "archived"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
 
-# سطوح اخطار
+
 class WarningLevel:
-    LEVEL_1 = 1    # اخطار اول — هشدار
-    LEVEL_2 = 2    # اخطار دوم — جدی
+    LEVEL_1 = 1
+    LEVEL_2 = 2
 
-# نقش‌های کاربری
+
 class UserRole:
     OWNER = "owner"
     ADMIN = "admin"
-    USER  = "user"
+    USER = "user"
 
-# وضعیت‌های مکالمه (State Machine)
-# هر کاربر در هر لحظه یک state دارد که در دیتابیس نگه داشته می‌شود
+
+# ════════════════════════════════════════════════════════════
+# ماشین وضعیت مکالمه
+# ════════════════════════════════════════════════════════════
+
 class ConvState:
-    # ─── کاربر عادی ─────────────────────────────────────────
-    IDLE                    = "idle"
-    REG_WAITING_LINK        = "reg_waiting_link"
-    REG_WAITING_MEMBERS     = "reg_waiting_members"
-    REG_WAITING_VIEWS       = "reg_waiting_views"
-    REG_WAITING_TOPIC       = "reg_waiting_topic"
-    REG_WAITING_BANNER      = "reg_waiting_banner"
-    REG_CONFIRM             = "reg_confirm"
+    IDLE = "idle"
 
-    # ─── ادمین ───────────────────────────────────────────────
-    ADMIN_IDLE              = "admin_idle"
-    ADMIN_REPORT_WRITING    = "admin_report_writing"
-    ADMIN_WARNING_REASON    = "admin_warning_reason"
-    ADMIN_REJECT_REASON     = "admin_reject_reason"
+    REG_WAITING_LINK = "reg_waiting_link"
+    REG_WAITING_MEMBERS = "reg_waiting_members"
+    REG_WAITING_VIEWS = "reg_waiting_views"
+    REG_WAITING_TOPIC = "reg_waiting_topic"
+    REG_WAITING_BANNER = "reg_waiting_banner"
+    REG_CONFIRM = "reg_confirm"
 
-    # ─── مالک ────────────────────────────────────────────────
-    OWNER_IDLE              = "owner_idle"
-    OWNER_ADD_ADMIN         = "owner_add_admin_step"
+    ADMIN_IDLE = "admin_idle"
+    ADMIN_REPORT_WRITING = "admin_report_writing"
+    ADMIN_WARNING_REASON = "admin_warning_reason"
+    ADMIN_REJECT_REASON = "admin_reject_reason"
+
+    OWNER_IDLE = "owner_idle"
+    OWNER_ADD_ADMIN = "owner_add_admin_step"
     OWNER_EDIT_TEXT_WAITING = "owner_edit_text_waiting"
     OWNER_ADD_FORCE_CHANNEL = "owner_add_force_channel"
     OWNER_BROADCAST_WRITING = "owner_broadcast_writing"
-    OWNER_SET_TARIFF        = "owner_set_tariff"
-    OWNER_SET_MAX_CHANNELS  = "owner_set_max_channels"
+    OWNER_SET_TARIFF = "owner_set_tariff"
+    OWNER_SET_MAX_CHANNELS = "owner_set_max_channels"
 
-# مراحل افزودن ادمین توسط مالک (sub-state داخل OWNER_ADD_ADMIN)
+
+# ════════════════════════════════════════════════════════════
+# مراحل افزودن ادمین
+# ════════════════════════════════════════════════════════════
+
 class AdminAddStep:
-    USERNAME        = "username"       # ۱. یوزرنیم ادمین
-    DISPLAY_NAME    = "display_name"   # ۲. نام نمایشی
-    LEVEL           = "level"          # ۳. سطح / تخصص (بازه آماری)
-    MIN_MEMBERS     = "min_members"    # ۴. حداقل عضو کانال‌های مرتبط
-    MAX_MEMBERS     = "max_members"    # ۵. حداکثر عضو کانال‌های مرتبط
-    ARCHIVE_CHANNEL = "archive_ch"     # ۶. آیدی کانال بایگانی اختصاصی
-    SHIFT           = "shift"          # ۷. شیفت کاری (صبح/عصر/شب)
-    CONFIRM         = "confirm"        # ۸. تأیید نهایی
+    USERNAME = "username"
+    ADMIN_ID = "admin_id"
+    DISPLAY_NAME = "display_name"
+    LEVEL = "level"
+    MIN_MEMBERS = "min_members"
+    MAX_MEMBERS = "max_members"
+    ARCHIVE_CHANNEL = "archive_ch"
+    SHIFT = "shift"
+    CONFIRM = "confirm"
 
-# شیفت‌های کاری
+
 class Shift:
-    MORNING   = "morning"    # صبح
-    AFTERNOON = "afternoon"  # عصر
-    NIGHT     = "night"      # شب
-    FULLTIME  = "fulltime"   # تمام وقت
+    MORNING = "morning"
+    AFTERNOON = "afternoon"
+    NIGHT = "night"
+    FULLTIME = "fulltime"
 
-# موضوعات کانال (قابل گسترش از پنل مالک)
+
 DEFAULT_TOPICS = [
     "طنز و سرگرمی",
     "اخبار و سیاست",
