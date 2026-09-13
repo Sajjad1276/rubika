@@ -1,17 +1,18 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..adapters.rubika import RubikaGateway
 from .campaigns import Campaign, CampaignTarget
-from .models import Channel, Operation, OperationStatus
+from .models import Channel
 
 logger = logging.getLogger(__name__)
 
 
 class PublicationService:
-    """Turns scheduled campaign targets into transport jobs without embedding Rubika logic."""
+    """Turns scheduled campaign targets into transport jobs."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -52,13 +53,16 @@ class PublicationService:
 
 
 class RotationPlanner:
-    """Builds a one-minute-spaced rotation for a list."""
+    """Builds a deterministic, one-minute-spaced rotation for a list."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def plan(self, campaign: Campaign, list_id: str, start_at: datetime, interval_seconds: int = 60) -> int:
+    async def plan(
+        self, campaign: Campaign, list_id: str, start_at: datetime, interval_seconds: int = 60
+    ) -> int:
         from .campaigns import CampaignService
+
         if interval_seconds < 1:
             raise ValueError("interval_seconds must be positive")
         created = await CampaignService(self.db).target_list(campaign, list_id)
@@ -70,6 +74,37 @@ class RotationPlanner:
             ).order_by(CampaignTarget.channel_id)
         )).all())
         for index, target in enumerate(targets):
-            target.planned_at = start_at + __import__("datetime").timedelta(seconds=index * interval_seconds)
+            target.planned_at = start_at + timedelta(seconds=index * interval_seconds)
         await self.db.flush()
         return created
+
+
+class RotationExecutor:
+    """Executes one target through a list account's Rubika gateway."""
+
+    def __init__(self, db: AsyncSession, gateway: RubikaGateway):
+        self.db = db
+        self.gateway = gateway
+
+    async def execute(self, target: CampaignTarget, *, source_guid: str, source_message_id: str) -> bool:
+        if target.status != "planned":
+            return False
+        service = PublicationService(self.db)
+        await service.claim(target)
+        channel = await self.db.get(Channel, target.channel_id)
+        if channel is None:
+            await service.mark_failed(target)
+            return False
+        try:
+            result = await self.gateway.forward(source_guid, channel.rubika_guid, source_message_id)
+            message_id = str(
+                getattr(result, "message_id", None)
+                or getattr(result, "id", None)
+                or result
+            )
+            await service.mark_published(target, message_id)
+            return True
+        except Exception:
+            logger.exception("campaign target publication failed: %s", target.id)
+            await service.mark_failed(target)
+            return False
