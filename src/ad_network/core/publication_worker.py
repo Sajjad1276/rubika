@@ -1,11 +1,12 @@
 import asyncio
 import logging
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..adapters.rubika import FastRubikaGateway, RubikaGateway
 from .list_accounts import ListAccountResolver, ListAccountService
+from .models import Channel
 from .publisher import PublicationService
 
 logger = logging.getLogger(__name__)
@@ -38,17 +39,17 @@ class PublicationWorker:
                         else FastRubikaGateway(client)
                     )
                     source_guid, source_message_id = await self.source_resolver(target, client)
-                    if await service.claim(target):
-                        channel = await db.get(__import__("ad_network.core.models", fromlist=["Channel"]).Channel, target.channel_id)
-                        if channel is None:
-                            await service.mark_failed(target)
-                            continue
-                        result = await gateway.forward(source_guid, channel.rubika_guid, source_message_id)
-                        message_id = self._message_id(result)
-                        if not message_id:
-                            raise RuntimeError("Rubika forward response did not contain a message id")
-                        await service.mark_published(target, message_id)
-                        published += 1
+                    await service.claim(target)
+                    channel = await db.get(Channel, target.channel_id)
+                    if channel is None:
+                        await service.mark_failed(target)
+                        continue
+                    result = await gateway.forward(source_guid, channel.rubika_guid, source_message_id)
+                    message_id = self._message_id(result)
+                    if not message_id:
+                        raise RuntimeError("Rubika forward response did not contain a message id")
+                    await service.mark_published(target, message_id)
+                    published += 1
                 except Exception:
                     logger.exception("publication target failed: %s", target.id)
                     try:
