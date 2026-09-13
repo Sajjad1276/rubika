@@ -9,7 +9,7 @@ import sqlalchemy as sa
 revision = "0002_commerce"
 down_revision = "0001_initial"
 branch_labels = None
- depends_on = None
+depends_on = None
 
 
 def upgrade() -> None:
@@ -37,12 +37,7 @@ def upgrade() -> None:
         sa.Column("status", sa.String(32), nullable=False, server_default="planned"),
         sa.UniqueConstraint("campaign_id", "channel_id", name="uq_campaign_channel"),
     )
-    for name, column in (
-        ("ix_campaign_targets_campaign_id", "campaign_id"),
-        ("ix_campaign_targets_list_id", "list_id"),
-        ("ix_campaign_targets_channel_id", "channel_id"),
-        ("ix_campaign_targets_status", "status"),
-    ):
+    for name, column in (("ix_campaign_targets_campaign_id", "campaign_id"), ("ix_campaign_targets_list_id", "list_id"), ("ix_campaign_targets_channel_id", "channel_id"), ("ix_campaign_targets_status", "status")):
         op.create_index(name, "campaign_targets", [column])
 
     op.create_table(
