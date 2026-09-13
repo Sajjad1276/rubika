@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,33 +16,21 @@ class AccountBinding:
 
 
 class ListAccountService:
-    """Owns the mapping between a List and its operational Rubika account.
-
-    Session secrets are deliberately not stored here. `session_ref` is only a
-    reference to an external/secure session store.
-    """
+    """Persistent mapping between a List and its operational user-bot account."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
     async def bind(self, *, list_id: str, rubika_user_id: str,
                    session_ref: str | None = None) -> ListAccount:
-        network_list = await self.db.get(ListNetwork, list_id)
-        if network_list is None:
+        if await self.db.get(ListNetwork, list_id) is None:
             raise ValueError("List not found")
-
-        existing = await self.db.scalar(
-            select(ListAccount).where(
-                ListAccount.list_id == list_id,
-                ListAccount.active.is_(True),
-            )
-        )
+        existing = await self.get_active(list_id)
         if existing is not None:
             existing.rubika_user_id = rubika_user_id
             existing.session_ref = session_ref
             await self.db.flush()
             return existing
-
         account = ListAccount(
             list_id=list_id,
             rubika_user_id=rubika_user_id,
@@ -54,10 +43,9 @@ class ListAccountService:
 
     async def get_active(self, list_id: str) -> ListAccount | None:
         return await self.db.scalar(
-            select(ListAccount).where(
-                ListAccount.list_id == list_id,
-                ListAccount.active.is_(True),
-            ).order_by(ListAccount.id)
+            select(ListAccount)
+            .where(ListAccount.list_id == list_id, ListAccount.active.is_(True))
+            .order_by(ListAccount.id)
         )
 
     async def require_active(self, list_id: str) -> ListAccount:
@@ -75,12 +63,12 @@ class ListAccountService:
 
 
 class ListAccountResolver:
-    """Runtime seam between DB account records and live Rubika clients."""
+    """Runtime registry of authenticated FastRub pyrubi clients."""
 
-    def __init__(self, clients: dict[str, object]):
-        self.clients = clients
+    def __init__(self, clients: dict[str, Any] | None = None):
+        self.clients = clients or {}
 
-    def resolve(self, account: ListAccount) -> object:
+    def resolve(self, account: ListAccount) -> Any:
         try:
             return self.clients[account.id]
         except KeyError as exc:
@@ -88,5 +76,8 @@ class ListAccountResolver:
                 f"No live Rubika client is bound to list account {account.id}"
             ) from exc
 
-    def bind(self, account_id: str, client: object) -> None:
+    def bind(self, account_id: str, client: Any) -> None:
         self.clients[account_id] = client
+
+    def unbind(self, account_id: str) -> None:
+        self.clients.pop(account_id, None)
