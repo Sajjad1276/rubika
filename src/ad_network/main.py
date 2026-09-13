@@ -33,13 +33,15 @@ async def connect_active_list_accounts(runtime: ListAccountRuntime) -> None:
 async def main() -> None:
     configure_logging()
     settings = get_settings()
-    await init_database()
 
     if not all((settings.user_bot_token, settings.admin_bot_token, settings.owner_bot_token)):
         raise RuntimeError(
             "USER_BOT_TOKEN, ADMIN_BOT_TOKEN and OWNER_BOT_TOKEN must all be configured"
         )
+    if not settings.owner_id:
+        raise RuntimeError("OWNER_ID must be configured")
 
+    await init_database()
     logging.info("Starting three-bot Rubika advertising network")
 
     account_resolver = ListAccountResolver()
@@ -51,19 +53,26 @@ async def main() -> None:
     admin_bot = await build_admin_bot(settings, account_resolver)
     owner_bot = await build_owner_bot(settings)
 
-    bot_tasks = [
+    tasks = [
         asyncio.create_task(user_bot.run(), name="user-bot"),
         asyncio.create_task(admin_bot.run(), name="admin-bot"),
         asyncio.create_task(owner_bot.run(), name="owner-bot"),
+        asyncio.create_task(worker.run(), name="network-worker"),
     ]
-    worker_task = asyncio.create_task(worker.run(), name="network-worker")
 
     try:
-        await asyncio.gather(*bot_tasks, worker_task)
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        for task in done:
+            exc = task.exception()
+            if exc is not None:
+                raise exc
+        await asyncio.gather(*pending)
     finally:
         await worker.stop()
-        worker_task.cancel()
-        await asyncio.gather(worker_task, return_exceptions=True)
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
         for account_id in list(account_resolver.clients):
             try:
