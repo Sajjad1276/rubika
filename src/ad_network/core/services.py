@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
@@ -55,9 +55,7 @@ class RegistrationService:
         recruited_by_admin_id: str | None = None,
         list_id: str | None = None,
     ) -> RegistrationRequest:
-        channel = await self.db.scalar(
-            select(Channel).where(Channel.rubika_guid == rubika_guid)
-        )
+        channel = await self.db.scalar(select(Channel).where(Channel.rubika_guid == rubika_guid))
         if channel is None:
             channel = Channel(
                 rubika_guid=rubika_guid,
@@ -148,20 +146,20 @@ class ListService:
         if network_list is None:
             raise ValueError("List not found")
 
-        # The counter is monotonic. Codes are never recycled after a channel leaves.
+        # Monotonic allocation: a code is never intentionally recycled.
         number = network_list.next_channel_number
         network_list.next_channel_number = number + 1
         await self.db.flush()
         return f"#{number:03d}"
 
     async def active_channel_count(self, list_id: str) -> int:
-        result = await self.db.scalar(
-            select(Channel.id).where(
+        count = await self.db.scalar(
+            select(func.count(Channel.id)).where(
                 Channel.list_id == list_id,
                 Channel.status == ChannelStatus.ACTIVE,
-            ).count()
+            )
         )
-        return int(result or 0)
+        return int(count or 0)
 
 
 class TaskService:
