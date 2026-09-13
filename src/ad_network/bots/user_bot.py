@@ -1,15 +1,15 @@
 import re
 
-from fast_rub import Client
+from fast_rub import Client, Conversation
+from fast_rub.core.forms import DataForm, Number, Text
 from sqlalchemy import select
 
 from ..core.commerce import CommerceService
 from ..core.config import Settings
 from ..core.db import SessionFactory
-from ..core.models import ListNetwork, RegistrationSource
+from ..core.models import Channel, ListNetwork, RegistrationSource
 from ..core.roles import RoleService
 from ..core.services import RegistrationService
-from ..core.session import SessionState
 from .common import button_id, inline_keyboard, reply, update_text, update_user_id
 
 CHANNEL_RE = re.compile(r"(?:https?://)?(?:rubika\.ir/)?(@?[A-Za-z0-9_]+)$")
@@ -24,107 +24,184 @@ def main_keyboard():
 
 
 async def send_main(message):
-    await reply(message, "📣 شبکه تبلیغات\n\nاز منوی زیر انتخاب کنید:", inline_keypad=main_keyboard())
+    await reply(
+        message,
+        "📣 شبکه تبلیغات\n\nاز منوی زیر انتخاب کنید:\n\n"
+        "ثبت کانال: /register\n"
+        "درخواست تبلیغ: /ad\n"
+        "وضعیت کانال: /status\n"
+        "پشتیبانی: /support",
+        inline_keypad=main_keyboard(),
+    )
+
+
+class RegisterForm(DataForm):
+    channel = Text(
+        "🔗 لینک یا شناسه عمومی کانال را ارسال کنید.\nمثال: @mychannel",
+        min_len=2,
+        max_len=255,
+        validator=lambda value: bool(CHANNEL_RE.fullmatch(value.strip())),
+        invalid_answer="❌ فرمت کانال معتبر نیست. نمونه: @mychannel",
+    )
+    list_code = Text(
+        "📚 کد لیست تبلیغ را وارد کنید.\nمثال: #001 یا 001",
+        min_len=1,
+        max_len=32,
+    )
+    confirm = Text(
+        "✅ برای ثبت درخواست عبارت «تأیید» را ارسال کنید.",
+        valid_inputs=["تأیید", "تایید", "yes", "1"],
+        invalid_answer="❌ فقط «تأیید» را ارسال کنید.",
+    )
+
+
+class AdForm(DataForm):
+    list_code = Text(
+        "📚 کد لیست تبلیغ را وارد کنید.\nمثال: #001 یا 001",
+        min_len=1,
+        max_len=32,
+    )
+    title = Text("📝 عنوان تبلیغ را ارسال کنید.", min_len=1, max_len=255)
+    content_ref = Text("📎 شناسه پیام تبلیغ در کانال مرجع را ارسال کنید.", min_len=1, max_len=255)
+    channel_count = Number("🔢 تعداد کانال هدف را وارد کنید.", min=1, max=100000)
+    retention_hours = Number("⏱ مدت ماندگاری را به ساعت وارد کنید.", min=1, max=720)
+
+
+class StatusForm(DataForm):
+    channel = Text(
+        "📊 شناسه یا لینک کانال خود را ارسال کنید.",
+        min_len=2,
+        max_len=255,
+    )
+
+
+class SupportForm(DataForm):
+    message = Text("🆘 پیام پشتیبانی خود را ارسال کنید.", min_len=1, max_len=4000)
 
 
 async def build_user_bot(settings: Settings) -> Client:
-    bot = Client(settings.user_bot_token)
+    bot = Client("rubika_user_bot", settings.user_bot_token)
 
-    async def handle_action(message, action: str):
+    register = Conversation(name="user_register", timeout=300)
+    ad = Conversation(name="user_ad", timeout=300)
+    status = Conversation(name="user_status", timeout=120)
+    support = Conversation(name="user_support", timeout=180)
+
+    @register.entry_form(RegisterForm, commands=["register"])
+    async def register_done(message, data):
         user_id = update_user_id(message)
         if not user_id:
-            return
+            return Conversation.END
         async with SessionFactory() as db:
             roles = RoleService(db, settings)
             user = await roles.get_or_create_user(rubika_user_id=user_id)
-            conversation = SessionState(db, user_id, "user")
-            session = await conversation.load()
-            data = SessionState.data(session)
-
-            if action == "home":
-                await conversation.set("idle")
-                await db.commit()
-                await send_main(message)
-                return
-
-            if action == "register":
-                await conversation.set("awaiting_channel", {})
-                await db.commit()
-                await reply(message, "🔗 لینک یا شناسه عمومی کانال را ارسال کنید.\n\nنمونه: @mychannel")
-                return
-
-            if action == "ad":
-                lists = list((await db.scalars(select(ListNetwork).where(ListNetwork.active.is_(True)).order_by(ListNetwork.code))).all())
-                if not lists:
-                    await db.commit()
-                    await reply(message, "⚠️ فعلاً لیست فعالی برای تبلیغ وجود ندارد.")
-                    return
-                await conversation.set("ad_list", {})
-                await db.commit()
-                rows = tuple((f"adlist:{item.id}", f"{item.code} | {item.name}") for item in lists)
-                await reply(message, "📢 لیست تبلیغ را انتخاب کنید:", inline_keypad=inline_keyboard(rows))
-                return
-
-            if action == "status":
-                await db.commit()
-                await reply(message, "📊 برای مشاهده وضعیت، شناسه یا لینک کانال خود را ارسال کنید.")
-                await conversation.set("awaiting_status_channel", {})
-                return
-
-            if action == "prices":
-                await db.commit()
-                await reply(message, "💰 تعرفه‌ها از منوی تبلیغ و بر اساس لیست هدف محاسبه می‌شوند.")
-                return
-
-            if action == "support":
-                await db.commit()
-                await reply(message, "🆘 پیام پشتیبانی خود را ارسال کنید. درخواست شما ثبت می‌شود.")
-                await conversation.set("support_message", {})
-                return
-
-            if action.startswith("list:"):
-                data["list_id"] = action.split(":", 1)[1]
-                await conversation.set("awaiting_channel_confirmation", data)
-                selected = await db.get(ListNetwork, data["list_id"])
-                await db.commit()
-                await reply(message, f"📋 {selected.name if selected else 'لیست'} انتخاب شد.\nبرای ثبت نهایی تأیید کنید.", inline_keypad=inline_keyboard((("reg:confirm", "✅ تأیید"), ("home", "↩️ انصراف"))))
-                return
-
-            if action == "reg:confirm":
-                if not data.get("channel_ref") or not data.get("list_id"):
-                    await conversation.set("idle")
-                    await db.commit()
-                    await reply(message, "❌ اطلاعات ثبت ناقص است.")
-                    return
-                request = await RegistrationService(db).start(
-                    rubika_guid=data["channel_ref"], applicant=user,
-                    source=RegistrationSource.SELF, list_id=data["list_id"],
-                )
-                await RegistrationService(db).submit_for_verification(request)
-                await conversation.set("idle")
-                await db.commit()
-                await reply(message, f"✅ درخواست ثبت شد.\nکد پیگیری: {request.id[:8]}", inline_keypad=inline_keyboard((("home", "🏠 منوی اصلی"),)))
-                return
-
-            if action.startswith("adlist:"):
-                list_id = action.split(":", 1)[1]
-                if await db.get(ListNetwork, list_id) is None:
-                    await db.commit()
-                    await reply(message, "❌ لیست پیدا نشد.")
-                    return
-                data["list_id"] = list_id
-                await conversation.set("ad_title", data)
-                await db.commit()
-                await reply(message, "📝 عنوان تبلیغ را ارسال کنید.")
-                return
-
+            channel_ref = data["channel"].strip()
+            if not CHANNEL_RE.fullmatch(channel_ref):
+                await db.rollback()
+                await reply(message, "❌ شناسه کانال معتبر نیست.")
+                return Conversation.END
+            raw_code = data["list_code"].strip().lstrip("#")
+            network_list = await db.scalar(select(ListNetwork).where(ListNetwork.code == raw_code))
+            if network_list is None:
+                await db.rollback()
+                await reply(message, "❌ کد لیست پیدا نشد. دوباره با /register تلاش کنید.")
+                return Conversation.END
+            request = await RegistrationService(db).start(
+                rubika_guid=channel_ref,
+                applicant=user,
+                source=RegistrationSource.SELF,
+                list_id=network_list.id,
+            )
+            await RegistrationService(db).submit_for_verification(request)
             await db.commit()
+            await reply(message, f"✅ درخواست ثبت شد.\nکد پیگیری: {request.id[:8]}", inline_keypad=main_keyboard())
+        return Conversation.END
+
+    @ad.entry_form(AdForm, commands=["ad"])
+    async def ad_done(message, data):
+        user_id = update_user_id(message)
+        if not user_id:
+            return Conversation.END
+        async with SessionFactory() as db:
+            roles = RoleService(db, settings)
+            user = await roles.get_or_create_user(rubika_user_id=user_id)
+            raw_code = data["list_code"].strip().lstrip("#")
+            network_list = await db.scalar(select(ListNetwork).where(ListNetwork.code == raw_code))
+            if network_list is None:
+                await db.rollback()
+                await reply(message, "❌ کد لیست پیدا نشد. دوباره با /ad تلاش کنید.")
+                return Conversation.END
+            try:
+                unit, total = await CommerceService(db).quote(
+                    list_id=network_list.id,
+                    channel_count=int(data["channel_count"]),
+                    retention_hours=int(data["retention_hours"]),
+                )
+                order = await CommerceService(db).create_order(
+                    advertiser=user,
+                    title=data["title"],
+                    content_ref=data["content_ref"],
+                    list_id=network_list.id,
+                    channel_count=int(data["channel_count"]),
+                    retention_hours=int(data["retention_hours"]),
+                )
+            except ValueError as exc:
+                await db.rollback()
+                await reply(message, f"⛔ قیمت‌گذاری انجام نشد: {exc}")
+                return Conversation.END
+            await db.commit()
+            await reply(
+                message,
+                "💰 پیش‌فاکتور آماده شد\n\n"
+                f"لیست: {network_list.code} | {network_list.name}\n"
+                f"تعداد: {order.channel_count}\n"
+                f"مدت: {order.retention_hours} ساعت\n"
+                f"قیمت هر کانال: {unit:,}\n"
+                f"مبلغ کل: {total:,}\n\n"
+                f"شناسه سفارش: {order.id[:8]}",
+                inline_keypad=main_keyboard(),
+            )
+        return Conversation.END
+
+    @status.entry_form(StatusForm, commands=["status"])
+    async def status_done(message, data):
+        async with SessionFactory() as db:
+            channel_ref = data["channel"].strip().lstrip("@")
+            channel = await db.scalar(select(Channel).where(Channel.rubika_guid == channel_ref))
+            await db.commit()
+            if channel:
+                await reply(message, f"📊 وضعیت: {channel.status.value}\nکد لیست: {channel.list_code or '-'}", inline_keypad=main_keyboard())
+            else:
+                await reply(message, "❌ کانال پیدا نشد.", inline_keypad=main_keyboard())
+        return Conversation.END
+
+    @support.entry_form(SupportForm, commands=["support"])
+    async def support_done(message, data):
+        async with SessionFactory() as db:
+            await db.commit()
+            await reply(message, "✅ درخواست پشتیبانی ثبت شد.", inline_keypad=main_keyboard())
+        return Conversation.END
+
+    bot.add_conversation(register)
+    bot.add_conversation(ad)
+    bot.add_conversation(status)
+    bot.add_conversation(support)
 
     @bot.on_button()
     async def on_button(message):
         action = button_id(message)
-        if action:
-            await handle_action(message, action)
+        if action == "home":
+            await send_main(message)
+        elif action == "register":
+            await reply(message, "📺 برای شروع ثبت کانال، /register را ارسال کنید.")
+        elif action == "ad":
+            await reply(message, "📢 برای ساخت سفارش تبلیغ، /ad را ارسال کنید.")
+        elif action == "status":
+            await reply(message, "📊 برای مشاهده وضعیت، /status را ارسال کنید.")
+        elif action == "prices":
+            await reply(message, "💰 تعرفه بر اساس لیست، تعداد کانال و مدت ماندگاری در /ad محاسبه می‌شود.")
+        elif action == "support":
+            await reply(message, "🆘 برای ارسال درخواست، /support را ارسال کنید.")
 
     @bot.on_message()
     async def handle(message):
@@ -132,131 +209,16 @@ async def build_user_bot(settings: Settings) -> Client:
         if not user_id:
             return
         text = update_text(message)
-
         if text in {"/start", "شروع", "منو", "menu"}:
             await send_main(message)
-            async with SessionFactory() as db:
-                await SessionState(db, user_id, "user").set("idle")
-                await db.commit()
             return
-
-        async with SessionFactory() as db:
-            roles = RoleService(db, settings)
-            user = await roles.get_or_create_user(rubika_user_id=user_id)
-            conversation = SessionState(db, user_id, "user")
-            session = await conversation.load()
-            data = SessionState.data(session)
-
-            if session.state == "awaiting_channel":
-                match = CHANNEL_RE.fullmatch(text)
-                if not match:
-                    await db.commit()
-                    await reply(message, "❌ فرمت کانال معتبر نیست. نمونه: @mychannel")
-                    return
-                data["channel_ref"] = match.group(1)
-                lists = list((await db.scalars(select(ListNetwork).where(ListNetwork.active.is_(True)).order_by(ListNetwork.code))).all())
-                if not lists:
-                    await conversation.set("idle")
-                    await db.commit()
-                    await reply(message, "⚠️ فعلاً هیچ لیست فعالی وجود ندارد.")
-                    return
-                if len(lists) == 1:
-                    data["list_id"] = lists[0].id
-                    await conversation.set("awaiting_channel_confirmation", data)
-                    await db.commit()
-                    await reply(message, f"📋 {lists[0].name}\nبرای ثبت نهایی تأیید کنید.", inline_keypad=inline_keyboard((("reg:confirm", "✅ تأیید"), ("home", "↩️ انصراف"))))
-                    return
-                await conversation.set("awaiting_list", data)
-                await db.commit()
-                rows = tuple((f"list:{item.id}", f"{item.code} | {item.name}") for item in lists)
-                await reply(message, "📚 لیست موردنظر را انتخاب کنید:", inline_keypad=inline_keyboard(rows))
-                return
-
-            if session.state == "awaiting_list":
-                await db.commit()
-                await reply(message, "از دکمه‌های لیست استفاده کنید.")
-                return
-
-            if session.state == "awaiting_channel_confirmation":
-                if text.lower() in {"تأیید", "تایید", "yes", "1"}:
-                    request = await RegistrationService(db).start(
-                        rubika_guid=data["channel_ref"], applicant=user,
-                        source=RegistrationSource.SELF, list_id=data["list_id"],
-                    )
-                    await RegistrationService(db).submit_for_verification(request)
-                    await conversation.set("idle")
-                    await db.commit()
-                    await reply(message, f"✅ درخواست ثبت شد.\nکد پیگیری: {request.id[:8]}")
-                    return
-                await conversation.set("idle")
-                await db.commit()
-                await reply(message, "ثبت لغو شد.")
-                return
-
-            if session.state == "ad_title":
-                data["title"] = text[:255]
-                await conversation.set("ad_content_ref", data)
-                await db.commit()
-                await reply(message, "📎 شناسه پیام تبلیغ در کانال مرجع را ارسال کنید.")
-                return
-
-            if session.state == "ad_content_ref":
-                data["content_ref"] = text
-                await conversation.set("ad_count", data)
-                await db.commit()
-                await reply(message, "🔢 تعداد کانال هدف را وارد کنید.")
-                return
-
-            if session.state == "ad_count":
-                if not text.isdigit() or int(text) <= 0:
-                    await db.commit()
-                    await reply(message, "❌ تعداد باید عدد مثبت باشد.")
-                    return
-                data["channel_count"] = int(text)
-                await conversation.set("ad_retention", data)
-                await db.commit()
-                await reply(message, "⏱ مدت ماندگاری را به ساعت وارد کنید. مثال: 6")
-                return
-
-            if session.state == "ad_retention":
-                if not text.isdigit() or int(text) <= 0:
-                    await db.commit()
-                    await reply(message, "❌ مدت باید عدد مثبت باشد.")
-                    return
-                try:
-                    unit, total = await CommerceService(db).quote(
-                        list_id=data["list_id"], channel_count=data["channel_count"], retention_hours=int(text)
-                    )
-                    order = await CommerceService(db).create_order(
-                        advertiser=user, title=data["title"], content_ref=data["content_ref"],
-                        list_id=data["list_id"], channel_count=data["channel_count"], retention_hours=int(text)
-                    )
-                except ValueError as exc:
-                    await conversation.set("idle")
-                    await db.commit()
-                    await reply(message, f"⛔ قیمت‌گذاری انجام نشد: {exc}")
-                    return
-                await conversation.set("idle")
-                await db.commit()
-                await reply(message, f"💰 پیش‌فاکتور آماده شد\n\nتعداد: {order.channel_count}\nمدت: {order.retention_hours} ساعت\nقیمت هر کانال: {unit:,}\nمبلغ کل: {total:,}\n\nشناسه سفارش: {order.id[:8]}", inline_keypad=inline_keyboard((("home", "🏠 منوی اصلی"),)))
-                return
-
-            if session.state == "support_message":
-                await conversation.set("idle")
-                await db.commit()
-                await reply(message, "✅ درخواست پشتیبانی ثبت شد.")
-                return
-
-            if session.state == "awaiting_status_channel":
-                await conversation.set("idle")
-                channel = await db.scalar(select(__import__("ad_network.core.models", fromlist=["Channel"]).Channel).where(__import__("ad_network.core.models", fromlist=["Channel"]).Channel.rubika_guid == text.lstrip("@")))
-                await db.commit()
-                if channel:
-                    await reply(message, f"📊 وضعیت: {channel.status.value}\nکد لیست: {channel.list_code or '-'}")
-                else:
-                    await reply(message, "❌ کانال پیدا نشد.")
-                return
-
-            await db.commit()
+        if text in {"ثبت کانال", "درخواست تبلیغ", "وضعیت کانال", "پشتیبانی"}:
+            mapping = {
+                "ثبت کانال": "/register",
+                "درخواست تبلیغ": "/ad",
+                "وضعیت کانال": "/status",
+                "پشتیبانی": "/support",
+            }
+            await reply(message, f"برای شروع: {mapping[text]}")
 
     return bot
