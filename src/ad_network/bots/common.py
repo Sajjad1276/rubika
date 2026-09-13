@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from fast_rub.button import KeyPad
+
 
 def first_attr(obj: Any, *names: str, default: Any = None) -> Any:
     for name in names:
@@ -28,14 +30,38 @@ def update_text(msg: Any) -> str:
     return str(first_attr(event, "text", "message_text", default="") or "").strip()
 
 
-async def reply(msg: Any, text: str) -> Any:
+def button_id(msg: Any) -> str:
+    event = first_attr(msg, "new_message", default=msg)
+    aux = first_attr(event, "aux_data", default=None)
+    return str(first_attr(aux, "button_id", default="") or "")
+
+
+def inline_keyboard(*rows: tuple[tuple[str, str], ...]):
+    keypad = KeyPad()
+    for row in rows:
+        keypad.append(*(keypad.simple(button, label) for button, label in row))
+    return keypad.build()
+
+
+async def reply(msg: Any, text: str, *, inline_keypad: Any = None) -> Any:
     method = getattr(msg, "reply", None)
     if method is not None:
+        if inline_keypad is not None:
+            return await method(text, inline_keypad=inline_keypad)
         return await method(text)
     method = getattr(msg, "send_text", None)
     if method is not None:
+        if inline_keypad is not None:
+            return await method(text, inline_keypad=inline_keypad)
         return await method(text)
     raise RuntimeError("FastRub update does not expose reply/send_text")
+
+
+async def answer_button(msg: Any, text: str = "") -> Any:
+    method = getattr(msg, "send_text", None)
+    if method is not None and text:
+        return await method(text)
+    return None
 
 
 @dataclass(frozen=True)
