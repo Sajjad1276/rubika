@@ -19,7 +19,7 @@ def admin_keyboard():
 
 
 async def build_admin_bot(settings: Settings) -> Client:
-    bot = Client(settings.admin_bot_token)
+    bot = Client("rubika_admin_bot", settings.admin_bot_token)
 
     async def show_requests(message, user):
         async with SessionFactory() as db:
@@ -63,7 +63,15 @@ async def build_admin_bot(settings: Settings) -> Client:
                     await reply(message, "❌ درخواست پیدا نشد.")
                     return
                 await db.commit()
-                await reply(message, f"🔎 درخواست {request.id[:8]}\nکانال: {channel.rubika_guid if channel else '-'}\nلیست: {request.list_id}\n\nدسترسی را از طریق دکمه زیر بررسی کنید.", inline_keypad=inline_keyboard(((f"access:{request.id}", "🔐 احراز دسترسی"),), ((f"approve:{request.id}", "✅ تأیید"), (f"reject:{request.id}", "🚫 رد")), (("home", "↩️ بازگشت"),)))
+                await reply(
+                    message,
+                    f"🔎 درخواست {request.id[:8]}\nکانال: {channel.rubika_guid if channel else '-'}\nلیست: {request.list_id}\n\nدسترسی را بررسی کنید.",
+                    inline_keypad=inline_keyboard(
+                        ((f"access:{request.id}", "🔐 احراز دسترسی"),),
+                        ((f"approve:{request.id}", "✅ تأیید"), (f"reject:{request.id}", "🚫 رد")),
+                        (("home", "↩️ بازگشت"),),
+                    ),
+                )
                 return
             if action.startswith("access:"):
                 request = await db.scalar(select(RegistrationRequest).where(RegistrationRequest.id == action.split(":", 1)[1], RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION))
@@ -71,7 +79,12 @@ async def build_admin_bot(settings: Settings) -> Client:
                     await db.commit()
                     await reply(message, "❌ درخواست پیدا نشد.")
                     return
-                await VerificationService(db).verify_from_rubika(request.channel_id, verified_by=user.id, list_id=request.list_id)
+                try:
+                    await VerificationService(db).verify_from_rubika(request.channel_id, verified_by=user.id, list_id=request.list_id)
+                except AttributeError:
+                    await db.rollback()
+                    await reply(message, "⛔ سرویس احراز Rubika هنوز به gateway عملیاتی متصل نشده است.")
+                    return
                 await db.commit()
                 await reply(message, "✅ دسترسی واقعی کانال از طریق اکانت عملیاتی List بررسی شد.", inline_keypad=inline_keyboard(((f"approve:{request.id}", "✅ فعال‌سازی"), ("home", "↩️ بازگشت"))))
                 return
