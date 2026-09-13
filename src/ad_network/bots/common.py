@@ -16,13 +16,7 @@ def first_attr(obj: Any, *names: str, default: Any = None) -> Any:
 
 def update_user_id(msg: Any) -> str | None:
     event = first_attr(msg, "new_message", default=msg)
-    return first_attr(
-        event,
-        "author_object_guid",
-        "author_guid",
-        "user_guid",
-        "chat_id",
-    )
+    return first_attr(event, "author_object_guid", "author_guid", "user_guid", "chat_id")
 
 
 def update_text(msg: Any) -> str:
@@ -37,8 +31,12 @@ def button_id(msg: Any) -> str:
 
 
 def inline_keyboard(*rows: tuple[tuple[str, str], ...]):
+    if len(rows) == 1 and rows[0] and isinstance(rows[0][0], tuple):
+        normalized = rows
+    else:
+        normalized = rows
     keypad = KeyPad()
-    for row in rows:
+    for row in normalized:
         keypad.append(*(keypad.simple(button, label) for button, label in row))
     return keypad.build()
 
@@ -55,13 +53,6 @@ async def reply(msg: Any, text: str, *, inline_keypad: Any = None) -> Any:
             return await method(text, inline_keypad=inline_keypad)
         return await method(text)
     raise RuntimeError("FastRub update does not expose reply/send_text")
-
-
-async def answer_button(msg: Any, text: str = "") -> Any:
-    method = getattr(msg, "send_text", None)
-    if method is not None and text:
-        return await method(text)
-    return None
 
 
 @dataclass(frozen=True)
