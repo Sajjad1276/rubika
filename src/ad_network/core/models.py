@@ -69,6 +69,19 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class BotSession(Base):
+    __tablename__ = "bot_sessions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    rubika_user_id: Mapped[str] = mapped_column(String(128), index=True)
+    bot_name: Mapped[str] = mapped_column(String(32), index=True)
+    state: Mapped[str] = mapped_column(String(64), default="idle")
+    data_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    __table_args__ = (UniqueConstraint("rubika_user_id", "bot_name", name="uq_bot_session_user_bot"),)
+
+
 class ListNetwork(Base):
     __tablename__ = "lists"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
