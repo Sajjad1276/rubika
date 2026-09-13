@@ -14,8 +14,16 @@ class OrderFlowService:
         self.db = db
 
     async def schedule_paid_order(
-        self, order: AdOrder, *, start_at: datetime, interval_seconds: int = 60
+        self, order: AdOrder, *, start_at: datetime, interval_seconds: int = 60,
+        list_beneficiary_id: str | None = None, admin_beneficiary_id: str | None = None,
     ) -> Campaign:
+        if order.status == OrderStatus.SCHEDULED:
+            existing = await self.db.scalar(
+                __import__('sqlalchemy').select(Campaign).where(Campaign.advertiser_id == order.advertiser_id,
+                                                               Campaign.title == order.title).order_by(Campaign.created_at.desc())
+            )
+            if existing:
+                return existing
         if order.status != OrderStatus.PAID:
             raise ValueError("Only paid orders can be scheduled")
         campaign = await CampaignService(self.db).create_campaign(
@@ -27,6 +35,16 @@ class OrderFlowService:
         campaign.status = "scheduled"
         await RotationPlanner(self.db).plan(
             campaign, order.list_id, start_at=start_at, interval_seconds=interval_seconds
+        )
+        await CampaignService(self.db).plan_operation(
+            list_id=order.list_id,
+            scheduled_at=start_at,
+            idempotency_key=f"order:{order.id}:publish",
+        )
+        await CommerceService(self.db).settle(
+            order,
+            list_beneficiary_id=list_beneficiary_id,
+            admin_beneficiary_id=admin_beneficiary_id,
         )
         order.status = OrderStatus.SCHEDULED
         order.scheduled_at = start_at
