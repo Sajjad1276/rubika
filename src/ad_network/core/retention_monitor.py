@@ -9,31 +9,23 @@ from .models import Channel, ChannelStatus, Violation
 
 
 class RetentionMonitor:
-    """Checks published messages after the campaign retention window."""
+    """Detects early deletion and completes targets after retention expires."""
 
     def __init__(self, db: AsyncSession, gateway: RubikaGateway):
         self.db = db
         self.gateway = gateway
 
     async def due_targets(self, limit: int = 100) -> list[CampaignTarget]:
-        now = datetime.now(timezone.utc)
         result = await self.db.scalars(
-            select(CampaignTarget).where(
+            select(CampaignTarget)
+            .where(
                 CampaignTarget.status == "published",
                 CampaignTarget.published_at.is_not(None),
-            ).order_by(CampaignTarget.published_at).limit(limit)
+            )
+            .order_by(CampaignTarget.published_at)
+            .limit(limit)
         )
-        due: list[CampaignTarget] = []
-        for target in result.all():
-            campaign = await self.db.get(Campaign, target.campaign_id)
-            if not campaign or not target.published_at:
-                continue
-            published = target.published_at
-            if published.tzinfo is None:
-                published = published.replace(tzinfo=timezone.utc)
-            if now >= published + timedelta(hours=campaign.retention_hours):
-                due.append(target)
-        return due
+        return list(result.all())
 
     @staticmethod
     def message_exists(raw: object) -> bool:
@@ -42,31 +34,50 @@ class RetentionMonitor:
         if isinstance(raw, list):
             return bool(raw)
         if isinstance(raw, dict):
-            return bool(raw.get("messages") or raw.get("message") or raw.get("data"))
+            messages = raw.get("messages")
+            if isinstance(messages, list):
+                return bool(messages)
+            return bool(raw.get("message") or raw.get("data") or raw.get("message_update"))
         return True
 
     async def check(self, target: CampaignTarget) -> bool:
         channel = await self.db.get(Channel, target.channel_id)
-        if channel is None or not target.published_message_id:
+        campaign = await self.db.get(Campaign, target.campaign_id)
+        if channel is None or campaign is None or not target.published_message_id or not target.published_at:
             return False
+
+        published = target.published_at
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         raw = await self.gateway.get_message(channel.rubika_guid, target.published_message_id)
-        if self.message_exists(raw):
-            target.status = "retained"
-            await self.db.flush()
+        exists = self.message_exists(raw)
+        deadline = published + timedelta(hours=campaign.retention_hours)
+
+        if exists:
+            if now >= deadline:
+                target.status = "retained"
+                await self.db.flush()
             return True
 
-        self.db.add(Violation(
-            channel_id=channel.id,
-            violation_type="early_ad_deletion",
-            severity=2,
-            note=f"message {target.published_message_id} missing during retention check",
-        ))
+        if now < deadline:
+            self.db.add(Violation(
+                channel_id=channel.id,
+                violation_type="early_ad_deletion",
+                severity=2,
+                note=f"message {target.published_message_id} deleted before retention deadline",
+            ))
+            target.status = "failed"
+            strikes = await self.db.scalar(select(func.count(Violation.id)).where(
+                Violation.channel_id == channel.id,
+                Violation.violation_type == "early_ad_deletion",
+            ))
+            if int(strikes or 0) >= 3:
+                channel.status = ChannelStatus.REMOVED
+                channel.list_id = None
+            await self.db.flush()
+            return False
+
+        target.status = "failed"
         await self.db.flush()
-        strikes = await self.db.scalar(select(func.count(Violation.id)).where(
-            Violation.channel_id == channel.id,
-            Violation.violation_type == "early_ad_deletion",
-        ))
-        if int(strikes or 0) >= 3:
-            channel.status = ChannelStatus.REMOVED
-            channel.list_id = None
         return False
