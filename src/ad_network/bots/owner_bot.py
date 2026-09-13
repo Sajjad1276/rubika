@@ -19,7 +19,7 @@ def owner_keyboard():
 
 
 async def build_owner_bot(settings: Settings) -> Client:
-    bot = Client(settings.owner_bot_token)
+    bot = Client("rubika_owner_bot", settings.owner_bot_token)
 
     async def handle_action(message, action: str):
         user_id = update_user_id(message)
