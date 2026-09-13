@@ -48,7 +48,7 @@ async def main() -> None:
     worker = NetworkWorker(account_resolver)
 
     user_bot = await build_user_bot(settings)
-    admin_bot = await build_admin_bot(settings)
+    admin_bot = await build_admin_bot(settings, account_resolver)
     owner_bot = await build_owner_bot(settings)
 
     bot_tasks = [
