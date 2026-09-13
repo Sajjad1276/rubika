@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..adapters.rubika import RubikaGateway
 from .models import (
     AuditLog,
     Channel,
@@ -112,6 +113,47 @@ class RegistrationService:
 class VerificationService:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def verify_from_rubika(self, *, channel_id: str, gateway: RubikaGateway,
+                                 operational_account_user_id: str,
+                                 verifier_id: str | None = None) -> Channel:
+        """Populate permission flags from Rubika itself, never from user claims."""
+        channel = await self.db.get(Channel, channel_id)
+        if channel is None:
+            raise ValueError("Channel not found")
+
+        access = await gateway.verify_channel_access(channel.rubika_guid, operational_account_user_id)
+        snapshot = await gateway.get_channel(channel.rubika_guid)
+        channel.member_count = snapshot.member_count
+        channel.username = snapshot.username
+        channel.title = snapshot.title
+        channel.can_send = access.can_send
+        channel.can_edit = access.can_edit
+        channel.can_delete = access.can_delete
+        channel.access_verified = (
+            access.is_admin and access.can_send and access.can_edit and access.can_delete
+        )
+        channel.verification_notes = (
+            "verified from Rubika" if channel.access_verified
+            else "Rubika account is not an administrator with all required permissions"
+        )
+        await self.db.flush()
+        await audit(
+            self.db,
+            actor_id=verifier_id,
+            action="channel_permissions_verified_from_rubika",
+            entity_type="channel",
+            entity_id=channel_id,
+            metadata={
+                "account_user_id": operational_account_user_id,
+                "member_count": channel.member_count,
+                "is_admin": access.is_admin,
+                "can_send": access.can_send,
+                "can_edit": access.can_edit,
+                "can_delete": access.can_delete,
+            },
+        )
+        return channel
 
     async def mark_permissions(self, channel_id: str, *, verified_by: str,
                                can_send: bool, can_edit: bool, can_delete: bool,
