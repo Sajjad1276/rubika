@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -76,9 +76,7 @@ class BotSession(Base):
     bot_name: Mapped[str] = mapped_column(String(32), index=True)
     state: Mapped[str] = mapped_column(String(64), default="idle")
     data_json: Mapped[str] = mapped_column(Text, default="{}")
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     __table_args__ = (UniqueConstraint("rubika_user_id", "bot_name", name="uq_bot_session_user_bot"),)
 
 
@@ -113,6 +111,11 @@ class Channel(Base):
     status: Mapped[ChannelStatus] = mapped_column(default=ChannelStatus.PENDING)
     list_id: Mapped[str | None] = mapped_column(ForeignKey("lists.id"), index=True)
     list_code: Mapped[str | None] = mapped_column(String(32), index=True)
+    access_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_send: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_edit: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_delete: Mapped[bool] = mapped_column(Boolean, default=False)
+    verification_notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     list: Mapped[ListNetwork | None] = relationship(back_populates="channels")
 
