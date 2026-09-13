@@ -55,33 +55,23 @@ def _first_value(data: Any, *keys: str) -> Any:
 
 
 class FastRubikaGateway:
-    """Rubika transport adapter. Business logic never depends on fast_r internals."""
+    """Adapter around FastRub's bundled pyrubi user-bot client."""
 
     def __init__(self, client: Any):
         self.client = client
 
     async def get_channel(self, guid: str) -> ChannelSnapshot:
-        info = await self.client.get_channel_info(guid)
-        data = _raw(info)
-        channel = data.get("channel", data) if isinstance(data, dict) else {}
+        data = _raw(await self.client.get_chat_info(guid))
+        chat = data.get("channel", data) if isinstance(data, dict) else {}
         return ChannelSnapshot(
             guid=guid,
-            title=_first_value(channel, "title", "name"),
-            username=_first_value(channel, "username", "user_name"),
-            member_count=_first_int(channel, "members_count", "member_count", "participants_count"),
+            title=_first_value(chat, "title", "name"),
+            username=_first_value(chat, "username", "user_name"),
+            member_count=_first_int(chat, "members_count", "member_count", "participants_count"),
         )
 
     async def verify_channel_access(self, guid: str, user_id: str) -> AccessSnapshot:
-        """Read the actual admin record. Missing API support fails closed."""
-        admin_response = None
-        for method_name in ("get_channel_admin_members", "get_group_admin_members"):
-            method = getattr(self.client, method_name, None)
-            if method is not None:
-                admin_response = await method(guid)
-                break
-        if admin_response is None:
-            raise RuntimeError("FastRub client does not expose an admin-members API")
-
+        admin_response = await self.client.get_admin_members(guid)
         raw = _raw(admin_response)
         members = []
         if isinstance(raw, dict):
@@ -96,29 +86,29 @@ class FastRubikaGateway:
             candidate = str(_first_value(item, "member_guid", "user_guid", "user_id", "guid", "id") or "")
             if candidate != str(user_id):
                 continue
-            permissions = item.get("permissions") or item.get("admin_permissions") or []
+            access = _raw(await self.client.get_admin_access_list(guid, user_id))
+            permissions = []
+            if isinstance(access, dict):
+                permissions = access.get("access_list") or access.get("permissions") or []
             if isinstance(permissions, dict):
-                permissions = [key for key, enabled in permissions.items() if enabled]
+                permissions = [k for k, v in permissions.items() if v]
             permissions = {str(p) for p in permissions}
-            can_send = bool(item.get("can_send") or item.get("can_post") or {"send", "write", "post"} & permissions)
-            can_edit = bool(item.get("can_edit") or {"edit", "edit_message", "post_edit_delete_message"} & permissions)
-            can_delete = bool(item.get("can_delete") or {"delete", "delete_message", "post_edit_delete_message"} & permissions)
             return AccessSnapshot(
                 user_id=user_id,
                 is_admin=True,
-                can_send=can_send,
-                can_edit=can_edit,
-                can_delete=can_delete,
-                raw=item,
+                can_send=bool({"send", "write", "post"} & permissions),
+                can_edit=bool({"edit", "edit_message", "post_edit_delete_message"} & permissions),
+                can_delete=bool({"delete", "delete_message", "post_edit_delete_message"} & permissions),
+                raw={"member": item, "access": access},
             )
 
         return AccessSnapshot(user_id=user_id, is_admin=False, can_send=False, can_edit=False, can_delete=False, raw=raw)
 
     async def forward(self, source_guid: str, target_guid: str, message_id: str) -> Any:
-        return await self.client.forward_messages(source_guid, target_guid, [message_id])
+        return await self.client.forward_messages(source_guid, [message_id], target_guid)
 
     async def edit(self, object_guid: str, message_id: str, text: str) -> Any:
-        return await self.client.edit_message(object_guid, message_id, text)
+        return await self.client.edit_message(object_guid, text, message_id)
 
     async def delete(self, object_guid: str, message_id: str) -> Any:
         return await self.client.delete_messages(object_guid, [message_id])
