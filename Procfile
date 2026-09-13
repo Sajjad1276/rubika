@@ -1,1 +1,1 @@
- worker: python main.py
+worker: python -m ad_network.main
