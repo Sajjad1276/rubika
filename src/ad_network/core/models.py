@@ -52,12 +52,20 @@ class OperationStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class UserRole(StrEnum):
+    USER = "user"
+    ADMIN = "admin"
+    SUPERVISOR = "supervisor"
+    OWNER = "owner"
+
+
 class User(Base):
     __tablename__ = "users"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     rubika_user_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(128))
     display_name: Mapped[str | None] = mapped_column(String(255))
+    roles_json: Mapped[str] = mapped_column(Text, default='["user"]')
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
