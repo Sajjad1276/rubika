@@ -3,9 +3,11 @@ from sqlalchemy import select
 
 from ..core.config import Settings
 from ..core.db import SessionFactory
+from ..core.list_accounts import ListAccountResolver, ListAccountService
 from ..core.models import Channel, RegistrationRequest, RegistrationStatus, UserRole
 from ..core.roles import RoleService
 from ..core.services import RegistrationService, VerificationService
+from ..adapters.list_account import ListAccountGatewayResolver
 from .common import button_id, inline_keyboard, reply, update_text, update_user_id
 
 
@@ -18,8 +20,12 @@ def admin_keyboard():
     )
 
 
-async def build_admin_bot(settings: Settings) -> Client:
+async def build_admin_bot(
+    settings: Settings,
+    account_resolver: ListAccountResolver | None = None,
+) -> Client:
     bot = Client("rubika_admin_bot", settings.admin_bot_token)
+    gateway_resolver = ListAccountGatewayResolver(account_resolver) if account_resolver else None
 
     async def show_requests(message, user):
         async with SessionFactory() as db:
@@ -74,22 +80,44 @@ async def build_admin_bot(settings: Settings) -> Client:
                 )
                 return
             if action.startswith("access:"):
-                request = await db.scalar(select(RegistrationRequest).where(RegistrationRequest.id == action.split(":", 1)[1], RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION))
+                request = await db.scalar(select(RegistrationRequest).where(
+                    RegistrationRequest.id == action.split(":", 1)[1],
+                    RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION,
+                ))
                 if not request:
                     await db.commit()
                     await reply(message, "❌ درخواست پیدا نشد.")
                     return
-                try:
-                    await VerificationService(db).verify_from_rubika(request.channel_id, verified_by=user.id, list_id=request.list_id)
-                except AttributeError:
-                    await db.rollback()
-                    await reply(message, "⛔ سرویس احراز Rubika هنوز به gateway عملیاتی متصل نشده است.")
+                if gateway_resolver is None:
+                    await db.commit()
+                    await reply(message, "⛔ gateway اکانت‌های عملیاتی در این اجرا متصل نیست.")
                     return
-                await db.commit()
-                await reply(message, "✅ دسترسی واقعی کانال از طریق اکانت عملیاتی List بررسی شد.", inline_keypad=inline_keyboard(((f"approve:{request.id}", "✅ فعال‌سازی"), ("home", "↩️ بازگشت"))))
+                try:
+                    account = await ListAccountService(db).require_active(request.list_id)
+                    gateway = gateway_resolver.resolve(account)
+                    await VerificationService(db).verify_from_rubika(
+                        channel_id=request.channel_id,
+                        gateway=gateway,
+                        operational_account_user_id=account.rubika_user_id,
+                        verifier_id=user.id,
+                    )
+                    await db.commit()
+                    await reply(
+                        message,
+                        "✅ دسترسی واقعی کانال از طریق اکانت عملیاتی List بررسی شد.",
+                        inline_keypad=inline_keyboard(
+                            ((f"approve:{request.id}", "✅ فعال‌سازی"), ("home", "↩️ بازگشت"),)
+                        ),
+                    )
+                except (ValueError, RuntimeError) as exc:
+                    await db.rollback()
+                    await reply(message, f"⛔ احراز انجام نشد: {exc}")
                 return
             if action.startswith("approve:"):
-                request = await db.scalar(select(RegistrationRequest).where(RegistrationRequest.id == action.split(":", 1)[1], RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION))
+                request = await db.scalar(select(RegistrationRequest).where(
+                    RegistrationRequest.id == action.split(":", 1)[1],
+                    RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION,
+                ))
                 if not request:
                     await db.commit()
                     await reply(message, "❌ درخواست پیدا نشد.")
@@ -103,7 +131,10 @@ async def build_admin_bot(settings: Settings) -> Client:
                     await reply(message, f"⛔ فعال‌سازی انجام نشد: {exc}")
                 return
             if action.startswith("reject:"):
-                request = await db.scalar(select(RegistrationRequest).where(RegistrationRequest.id == action.split(":", 1)[1], RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION))
+                request = await db.scalar(select(RegistrationRequest).where(
+                    RegistrationRequest.id == action.split(":", 1)[1],
+                    RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION,
+                ))
                 if request:
                     await RegistrationService(db).verify(request, approved=False, verifier_id=user.id)
                     await db.commit()
