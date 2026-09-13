@@ -1,16 +1,23 @@
 from datetime import datetime
 from enum import StrEnum
 from uuid import uuid4
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-class Base(DeclarativeBase): pass
 
-def new_id() -> str: return str(uuid4())
+class Base(DeclarativeBase):
+    pass
+
+
+def new_id() -> str:
+    return str(uuid4())
+
 
 class RegistrationSource(StrEnum):
     SELF = "user_self_registered"
     ADMIN_RECRUITED = "admin_recruited"
+
 
 class RegistrationStatus(StrEnum):
     DRAFT = "draft"
@@ -20,11 +27,30 @@ class RegistrationStatus(StrEnum):
     REJECTED = "rejected"
     CANCELLED = "cancelled"
 
+
 class ChannelStatus(StrEnum):
     PENDING = "pending"
     ACTIVE = "active"
     SUSPENDED = "suspended"
     REMOVED = "removed"
+
+
+class TaskStatus(StrEnum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class OperationStatus(StrEnum):
+    PLANNED = "planned"
+    RUNNING = "running"
+    DONE = "done"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
 
 class User(Base):
     __tablename__ = "users"
@@ -34,6 +60,7 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+
 class ListNetwork(Base):
     __tablename__ = "lists"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -41,8 +68,10 @@ class ListNetwork(Base):
     name: Mapped[str] = mapped_column(String(255))
     min_channels: Mapped[int] = mapped_column(Integer, default=20)
     active: Mapped[bool] = mapped_column(default=True)
+    next_channel_number: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     channels: Mapped[list["Channel"]] = relationship(back_populates="list")
+
 
 class ListAccount(Base):
     __tablename__ = "list_accounts"
@@ -51,6 +80,7 @@ class ListAccount(Base):
     rubika_user_id: Mapped[str] = mapped_column(String(128), index=True)
     session_ref: Mapped[str | None] = mapped_column(String(255))
     active: Mapped[bool] = mapped_column(default=True)
+
 
 class Channel(Base):
     __tablename__ = "channels"
@@ -65,6 +95,9 @@ class Channel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     list: Mapped[ListNetwork | None] = relationship(back_populates="channels")
 
+    __table_args__ = (UniqueConstraint("list_id", "list_code", name="uq_channel_list_code"),)
+
+
 class RegistrationRequest(Base):
     __tablename__ = "registration_requests"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -78,25 +111,28 @@ class RegistrationRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+
 class Task(Base):
     __tablename__ = "tasks"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     assignee_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     task_type: Mapped[str] = mapped_column(String(64), index=True)
-    status: Mapped[str] = mapped_column(String(32), default="pending")
+    status: Mapped[TaskStatus] = mapped_column(default=TaskStatus.PENDING)
     payload: Mapped[str] = mapped_column(Text, default="{}")
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
 
 class Operation(Base):
     __tablename__ = "operations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     list_id: Mapped[str] = mapped_column(ForeignKey("lists.id"), index=True)
     operation_type: Mapped[str] = mapped_column(String(64), index=True)
-    status: Mapped[str] = mapped_column(String(32), default="planned")
+    status: Mapped[OperationStatus] = mapped_column(default=OperationStatus.PLANNED)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
 
 class Violation(Base):
     __tablename__ = "violations"
@@ -106,7 +142,9 @@ class Violation(Base):
     violation_type: Mapped[str] = mapped_column(String(64))
     severity: Mapped[int] = mapped_column(Integer, default=1)
     note: Mapped[str | None] = mapped_column(Text)
+    resolved: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
