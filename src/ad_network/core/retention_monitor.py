@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +9,7 @@ from .models import Channel, ChannelStatus, Violation
 
 
 class RetentionMonitor:
-    """Checks published messages and enforces the channel three-strike rule."""
+    """Checks published messages after the campaign retention window."""
 
     def __init__(self, db: AsyncSession, gateway: RubikaGateway):
         self.db = db
@@ -18,19 +18,20 @@ class RetentionMonitor:
     async def due_targets(self, limit: int = 100) -> list[CampaignTarget]:
         now = datetime.now(timezone.utc)
         result = await self.db.scalars(
-            select(CampaignTarget).join(Campaign, Campaign.id == CampaignTarget.campaign_id)
-            .where(
+            select(CampaignTarget).where(
                 CampaignTarget.status == "published",
                 CampaignTarget.published_at.is_not(None),
-            )
-            .order_by(CampaignTarget.published_at)
-            .limit(limit)
+            ).order_by(CampaignTarget.published_at).limit(limit)
         )
-        rows = list(result.all())
         due: list[CampaignTarget] = []
-        for target in rows:
+        for target in result.all():
             campaign = await self.db.get(Campaign, target.campaign_id)
-            if campaign and target.published_at and now >= target.published_at.replace(tzinfo=timezone.utc):
+            if not campaign or not target.published_at:
+                continue
+            published = target.published_at
+            if published.tzinfo is None:
+                published = published.replace(tzinfo=timezone.utc)
+            if now >= published + timedelta(hours=campaign.retention_hours):
                 due.append(target)
         return due
 
@@ -49,16 +50,17 @@ class RetentionMonitor:
         if channel is None or not target.published_message_id:
             return False
         raw = await self.gateway.get_message(channel.rubika_guid, target.published_message_id)
-        exists = self.message_exists(raw)
-        if exists:
+        if self.message_exists(raw):
+            target.status = "retained"
+            await self.db.flush()
             return True
-        violation = Violation(
+
+        self.db.add(Violation(
             channel_id=channel.id,
             violation_type="early_ad_deletion",
             severity=2,
             note=f"message {target.published_message_id} missing during retention check",
-        )
-        self.db.add(violation)
+        ))
         await self.db.flush()
         strikes = await self.db.scalar(select(func.count(Violation.id)).where(
             Violation.channel_id == channel.id,
