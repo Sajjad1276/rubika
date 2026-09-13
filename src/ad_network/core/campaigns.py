@@ -11,6 +11,7 @@ from .models import Base, Channel, ChannelStatus, ListNetwork, Operation, Operat
 class Campaign(Base):
     __tablename__ = "campaigns"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    order_id: Mapped[str | None] = mapped_column(ForeignKey("ad_orders.id"), unique=True, index=True)
     title: Mapped[str] = mapped_column(String(255))
     advertiser_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     content_ref: Mapped[str] = mapped_column(Text)
@@ -46,10 +47,16 @@ class CampaignService:
         content_ref: str,
         advertiser_id: str | None = None,
         retention_hours: int = 6,
+        order_id: str | None = None,
     ) -> Campaign:
         if retention_hours <= 0:
             raise ValueError("retention_hours must be positive")
+        if order_id:
+            existing = await self.db.scalar(select(Campaign).where(Campaign.order_id == order_id))
+            if existing:
+                return existing
         campaign = Campaign(
+            order_id=order_id,
             title=title,
             content_ref=content_ref,
             advertiser_id=advertiser_id,
@@ -63,7 +70,6 @@ class CampaignService:
         network_list = await self.db.get(ListNetwork, list_id)
         if network_list is None or not network_list.active:
             raise ValueError("Active list not found")
-
         channels = (
             await self.db.scalars(
                 select(Channel).where(
@@ -74,45 +80,23 @@ class CampaignService:
         ).all()
         created = 0
         for channel in channels:
-            exists = await self.db.scalar(
-                select(CampaignTarget.id).where(
-                    CampaignTarget.campaign_id == campaign.id,
-                    CampaignTarget.channel_id == channel.id,
-                )
-            )
+            exists = await self.db.scalar(select(CampaignTarget.id).where(
+                CampaignTarget.campaign_id == campaign.id,
+                CampaignTarget.channel_id == channel.id,
+            ))
             if exists:
                 continue
-            self.db.add(
-                CampaignTarget(
-                    campaign_id=campaign.id,
-                    list_id=list_id,
-                    channel_id=channel.id,
-                    planned_at=planned_at,
-                )
-            )
+            self.db.add(CampaignTarget(campaign_id=campaign.id, list_id=list_id, channel_id=channel.id, planned_at=planned_at))
             created += 1
         await self.db.flush()
         return created
 
-    async def plan_operation(
-        self,
-        *,
-        list_id: str,
-        scheduled_at: datetime,
-        idempotency_key: str,
-    ) -> Operation:
-        existing = await self.db.scalar(
-            select(Operation).where(Operation.idempotency_key == idempotency_key)
-        )
+    async def plan_operation(self, *, list_id: str, scheduled_at: datetime, idempotency_key: str) -> Operation:
+        existing = await self.db.scalar(select(Operation).where(Operation.idempotency_key == idempotency_key))
         if existing:
             return existing
-        operation = Operation(
-            list_id=list_id,
-            operation_type="campaign_publish",
-            status=OperationStatus.PLANNED,
-            scheduled_at=scheduled_at,
-            idempotency_key=idempotency_key,
-        )
+        operation = Operation(list_id=list_id, operation_type="campaign_publish", status=OperationStatus.PLANNED,
+                              scheduled_at=scheduled_at, idempotency_key=idempotency_key)
         self.db.add(operation)
         await self.db.flush()
         return operation
