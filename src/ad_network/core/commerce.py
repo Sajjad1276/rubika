@@ -21,6 +21,13 @@ class OrderStatus(StrEnum):
     REFUNDED = "refunded"
 
 
+class PaymentStatus(StrEnum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    REFUNDED = "refunded"
+
+
 class PriceRule(Base):
     __tablename__ = "price_rules"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
@@ -49,6 +56,20 @@ class AdOrder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Payment(Base):
+    __tablename__ = "payments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    order_id: Mapped[str] = mapped_column(ForeignKey("ad_orders.id"), unique=True, index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="manual")
+    status: Mapped[PaymentStatus] = mapped_column(default=PaymentStatus.PENDING, index=True)
+    amount: Mapped[int] = mapped_column(Integer)
+    provider_reference: Mapped[str | None] = mapped_column(String(255), unique=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    confirmed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class EarningsEntry(Base):
     __tablename__ = "earnings_entries"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
@@ -62,7 +83,7 @@ class EarningsEntry(Base):
 
 
 class CommerceService:
-    """Quotes orders from active pricing rules and keeps money calculations server-side."""
+    """Server-side pricing, payment confirmation and settlement primitives."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -96,21 +117,70 @@ class CommerceService:
             advertiser_id=advertiser.id, title=title, content_ref=content_ref,
             list_id=list_id, channel_count=channel_count, retention_hours=retention_hours,
             unit_price=unit_price, total_price=total,
-            status=OrderStatus.QUOTED, scheduled_at=scheduled_at,
+            status=OrderStatus.AWAITING_PAYMENT, scheduled_at=scheduled_at,
         )
         self.db.add(order)
         await self.db.flush()
         return order
 
-    async def mark_paid(self, order_id: str) -> AdOrder:
+    async def create_payment(self, order_id: str, *, idempotency_key: str | None = None) -> Payment:
         order = await self.db.get(AdOrder, order_id)
         if order is None:
             raise ValueError("Order not found")
-        if order.status not in {OrderStatus.QUOTED, OrderStatus.AWAITING_PAYMENT}:
-            raise ValueError(f"Cannot pay order from state {order.status}")
+        existing = await self.db.scalar(select(Payment).where(Payment.order_id == order_id))
+        if existing:
+            return existing
+        key = idempotency_key or f"payment:{order_id}"
+        payment = Payment(order_id=order.id, amount=order.total_price, idempotency_key=key)
+        self.db.add(payment)
+        await self.db.flush()
+        return payment
+
+    async def confirm_payment(self, payment_id: str, *, confirmer_id: str, provider_reference: str | None = None) -> Payment:
+        payment = await self.db.get(Payment, payment_id)
+        if payment is None:
+            raise ValueError("Payment not found")
+        if payment.status == PaymentStatus.CONFIRMED:
+            return payment
+        if payment.status != PaymentStatus.PENDING:
+            raise ValueError(f"Cannot confirm payment from state {payment.status}")
+        order = await self.db.get(AdOrder, payment.order_id)
+        if order is None:
+            raise ValueError("Order not found")
+        payment.status = PaymentStatus.CONFIRMED
+        payment.confirmed_by = confirmer_id
+        payment.confirmed_at = datetime.utcnow()
+        payment.provider_reference = provider_reference or payment.provider_reference
         order.status = OrderStatus.PAID
         await self.db.flush()
-        return order
+        return payment
+
+    async def settle(self, order: AdOrder, *, list_beneficiary_id: str | None, admin_beneficiary_id: str | None,
+                     list_percent: int = 70, admin_percent: int = 20) -> list[EarningsEntry]:
+        if order.status not in {OrderStatus.PAID, OrderStatus.SCHEDULED, OrderStatus.RUNNING, OrderStatus.COMPLETED}:
+            raise ValueError("Only paid or executed orders can be settled")
+        if list_percent < 0 or admin_percent < 0 or list_percent + admin_percent > 100:
+            raise ValueError("Invalid settlement percentages")
+        entries: list[EarningsEntry] = []
+        shares = (("list_share", list_beneficiary_id, order.total_price * list_percent // 100),
+                  ("admin_share", admin_beneficiary_id, order.total_price * admin_percent // 100))
+        for entry_type, beneficiary_id, amount in shares:
+            if not beneficiary_id or amount <= 0:
+                continue
+            existing = await self.db.scalar(select(EarningsEntry).where(
+                EarningsEntry.order_id == order.id,
+                EarningsEntry.beneficiary_id == beneficiary_id,
+                EarningsEntry.entry_type == entry_type,
+            ))
+            if existing:
+                entries.append(existing)
+                continue
+            entry = EarningsEntry(order_id=order.id, beneficiary_id=beneficiary_id,
+                                  list_id=order.list_id, amount=amount, entry_type=entry_type)
+            self.db.add(entry)
+            entries.append(entry)
+        await self.db.flush()
+        return entries
 
     async def record_list_earning(self, order: AdOrder, beneficiary_id: str, amount: int) -> EarningsEntry:
         if amount < 0 or amount > order.total_price:
