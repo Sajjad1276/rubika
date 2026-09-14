@@ -49,26 +49,23 @@ class RoleService:
     def roles(user: User) -> list[str]:
         try:
             roles = json.loads(user.roles_json or "[]")
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             roles = []
-        return roles
+        return [str(role) for role in roles] if isinstance(roles, list) else []
 
     def has(self, user: User, *allowed: UserRole) -> bool:
-        """Authorize privileged bot actions exclusively by Rubika username."""
+        """Authorize owner/admin by configured username and supervisors by role."""
+        allowed_set = set(allowed)
         username = _normalize_username(user.username)
-        privileged = set(allowed) & {
-            UserRole.ADMIN,
-            UserRole.SUPERVISOR,
-            UserRole.OWNER,
-        }
-        if privileged:
-            if UserRole.OWNER in allowed and username == _normalize_username(self.settings.owner_username):
-                return True
-            if UserRole.ADMIN in allowed and username == _normalize_username(self.settings.admin_username):
-                return True
-            # Supervisor/legacy database roles are intentionally not accepted
-            # for admin/owner bot authorization anymore.
-            return False
+
+        if UserRole.OWNER in allowed_set and username == _normalize_username(self.settings.owner_username):
+            return True
+        if UserRole.ADMIN in allowed_set and username == _normalize_username(self.settings.admin_username):
+            return True
 
         current = set(self.roles(user))
-        return any(role.value in current for role in allowed)
+        if UserRole.SUPERVISOR in allowed_set and UserRole.SUPERVISOR.value in current:
+            return True
+        if UserRole.USER in allowed_set and UserRole.USER.value in current:
+            return True
+        return False
