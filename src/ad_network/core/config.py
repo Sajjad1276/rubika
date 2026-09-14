@@ -11,8 +11,11 @@ class Settings(BaseSettings):
     admin_bot_token: str = ""
     owner_bot_token: str = ""
 
+    # Privileged bot access is username-only. OWNER_ID is kept only for
+    # backward-compatible environment parsing and is not used for auth.
     owner_id: str = ""
     owner_username: str = ""
+    admin_username: str = ""
     log_level: str = "INFO"
 
     # Operational Rubika user-bot sessions. On Railway this should point to a
