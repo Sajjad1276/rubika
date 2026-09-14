@@ -1,14 +1,24 @@
+import asyncio
 import logging
+import subprocess
 
-from .core.db import engine
-from .core.models import Base
-from .core import campaigns as _campaigns  # noqa: F401
-from .core import commerce as _commerce  # noqa: F401
+
+def _run_migrations() -> None:
+    result = subprocess.run(
+        ["alembic", "upgrade", "head"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Database migration failed: "
+            + (result.stderr.strip() or result.stdout.strip() or "unknown error")
+        )
 
 
 async def init_database() -> None:
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+    await asyncio.to_thread(_run_migrations)
 
 
 def configure_logging() -> None:
