@@ -13,33 +13,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "campaigns",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("order_id", sa.String(36), sa.ForeignKey("ad_orders.id"), unique=True),
-        sa.Column("title", sa.String(255), nullable=False),
-        sa.Column("advertiser_id", sa.String(36), sa.ForeignKey("users.id")),
-        sa.Column("content_ref", sa.Text(), nullable=False),
-        sa.Column("retention_hours", sa.Integer(), nullable=False, server_default="6"),
-        sa.Column("status", sa.String(32), nullable=False, server_default="draft"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-    )
-    op.create_index("ix_campaigns_order_id", "campaigns", ["order_id"])
-    op.create_index("ix_campaigns_status", "campaigns", ["status"])
-
-    op.create_table(
-        "price_rules",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("list_id", sa.String(36), sa.ForeignKey("lists.id")),
-        sa.Column("title", sa.String(255), nullable=False),
-        sa.Column("min_channels", sa.Integer(), nullable=False, server_default="1"),
-        sa.Column("price_per_channel", sa.Integer(), nullable=False),
-        sa.Column("retention_hours", sa.Integer(), nullable=False, server_default="6"),
-        sa.Column("active", sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-    )
-    op.create_index("ix_price_rules_list_id", "price_rules", ["list_id"])
-
+    # Create ad_orders before campaigns because campaigns.order_id references it.
     op.create_table(
         "ad_orders",
         sa.Column("id", sa.String(36), primary_key=True),
@@ -57,6 +31,33 @@ def upgrade() -> None:
     )
     for name, column in (("ix_ad_orders_advertiser_id", "advertiser_id"), ("ix_ad_orders_list_id", "list_id"), ("ix_ad_orders_status", "status")):
         op.create_index(name, "ad_orders", [column])
+
+    op.create_table(
+        "price_rules",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("list_id", sa.String(36), sa.ForeignKey("lists.id")),
+        sa.Column("title", sa.String(255), nullable=False),
+        sa.Column("min_channels", sa.Integer(), nullable=False, server_default="1"),
+        sa.Column("price_per_channel", sa.Integer(), nullable=False),
+        sa.Column("retention_hours", sa.Integer(), nullable=False, server_default="6"),
+        sa.Column("active", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_price_rules_list_id", "price_rules", ["list_id"])
+
+    op.create_table(
+        "campaigns",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("order_id", sa.String(36), sa.ForeignKey("ad_orders.id"), unique=True),
+        sa.Column("title", sa.String(255), nullable=False),
+        sa.Column("advertiser_id", sa.String(36), sa.ForeignKey("users.id")),
+        sa.Column("content_ref", sa.Text(), nullable=False),
+        sa.Column("retention_hours", sa.Integer(), nullable=False, server_default="6"),
+        sa.Column("status", sa.String(32), nullable=False, server_default="draft"),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_campaigns_order_id", "campaigns", ["order_id"])
+    op.create_index("ix_campaigns_status", "campaigns", ["status"])
 
     op.create_table(
         "payments",
@@ -109,6 +110,6 @@ def downgrade() -> None:
     op.drop_table("campaign_targets")
     op.drop_table("earnings_entries")
     op.drop_table("payments")
-    op.drop_table("ad_orders")
-    op.drop_table("price_rules")
     op.drop_table("campaigns")
+    op.drop_table("price_rules")
+    op.drop_table("ad_orders")
