@@ -23,7 +23,14 @@ async def show_accounts(event):
         accounts = await ListAccountService(db).list_active()
         lists = {}
         if accounts:
-            lists = {x.id: x for x in (await db.scalars(select(ListNetwork).where(ListNetwork.id.in_({a.list_id for a in accounts})))).all()}
+            lists = {
+                x.id: x
+                for x in (
+                    await db.scalars(
+                        select(ListNetwork).where(ListNetwork.id.in_({a.list_id for a in accounts}))
+                    )
+                ).all()
+            }
         await db.commit()
     await reply(event, "👤 اکانت‌های عملیاتی لیست:", inline_keypad=account_keyboard(accounts, lists))
 
@@ -51,10 +58,14 @@ async def account_button(event, action: str, runtime, bot) -> bool:
         if not account:
             await reply(event, "❌ اکانت پیدا نشد.")
             return True
-        await reply(event, f"👤 {network.code if network else account.list_id}\nروبیکا: {account.rubika_user_id}\nSession: {account.session_ref or '-'}", inline_keypad=inline_keyboard(
-            ((f"account:test:{account.id}", "🔌 تست اتصال"), (f"account:replace:{account.id}", "🔄 تعویض")),
-            ((f"account:disable:{account.id}", "⛔ غیرفعال"), ("accounts", "↩️ بازگشت")),
-        ))
+        await reply(
+            event,
+            f"👤 {network.code if network else account.list_id}\nروبیکا: {account.rubika_user_id}\nSession: {account.session_ref or '-'}",
+            inline_keypad=inline_keyboard(
+                ((f"account:test:{account.id}", "🔌 تست اتصال"), (f"account:replace:{account.id}", "🔄 تعویض")),
+                ((f"account:disable:{account.id}", "⛔ غیرفعال"), ("accounts", "↩️ بازگشت")),
+            ),
+        )
         return True
     if len(parts) != 3:
         return False
@@ -62,7 +73,9 @@ async def account_button(event, action: str, runtime, bot) -> bool:
     async with SessionFactory() as db:
         account = await db.get(ListAccount, account_id)
         if not account:
-            await db.commit(); await reply(event, "❌ اکانت پیدا نشد."); return True
+            await db.commit()
+            await reply(event, "❌ اکانت پیدا نشد.")
+            return True
         if op == "test":
             await db.commit()
             try:
@@ -74,7 +87,7 @@ async def account_button(event, action: str, runtime, bot) -> bool:
         if op == "replace":
             _STATES[user_id] = ("replace", account.id)
             await db.commit()
-            await reply(event, "🔄 اکانت جدید را بفرست:\nکد لیست | شناسه کاربر روبیکا | مسیر Session")
+            await reply(event, "🔄 مشخصات اکانت جدید را بفرست:\nشناسه کاربر روبیکا | مسیر Session")
             return True
         if op == "disable":
             try:
@@ -83,7 +96,8 @@ async def account_button(event, action: str, runtime, bot) -> bool:
                 await runtime.disconnect(account.id)
                 await reply(event, "⛔ اکانت غیرفعال و از Runtime خارج شد.")
             except (ValueError, RuntimeError) as exc:
-                await db.rollback(); await reply(event, f"❌ عملیات ناموفق: {exc}")
+                await db.rollback()
+                await reply(event, f"❌ عملیات ناموفق: {exc}")
             return True
     return False
 
@@ -95,25 +109,47 @@ async def account_text(event, runtime, bot) -> bool:
     state = _STATES.get(uid)
     if not state:
         return False
-    parts = [x.strip() for x in update_text(event).split("|")]
-    if len(parts) != 3 or not all(parts):
-        await reply(event, "فرمت: کد لیست | شناسه کاربر روبیکا | مسیر Session")
-        return True
-    list_code, rubika_user_id, session_ref = parts
-    if not AccountManagementService.resolve_session_path(session_ref).exists():
+
+    text = update_text(event)
+    parts = [x.strip() for x in text.split("|")]
+    if state[0] == "add":
+        if len(parts) != 3 or not all(parts):
+            await reply(event, "فرمت: کد لیست | شناسه کاربر روبیکا | مسیر Session")
+            return True
+        list_code, rubika_user_id, session_ref = parts
+    else:
+        if len(parts) != 2 or not all(parts):
+            await reply(event, "فرمت: شناسه کاربر روبیکا | مسیر Session")
+            return True
+        rubika_user_id, session_ref = parts
+        list_code = ""
+
+    if not AccountManagementService.resolve_session_path(session_ref).is_file():
         await reply(event, "❌ فایل Session پیدا نشد.")
         return True
+
     async with SessionFactory() as db:
         service = AccountManagementService(db, runtime)
         try:
             if state[0] == "add":
-                account = await service.attach(list_code=list_code, rubika_user_id=rubika_user_id, session_ref=session_ref)
+                account = await service.attach(
+                    list_code=list_code,
+                    rubika_user_id=rubika_user_id,
+                    session_ref=session_ref,
+                )
             else:
-                account = await service.replace(state[1], rubika_user_id=rubika_user_id, session_ref=session_ref)
+                account = await service.replace(
+                    state[1],
+                    rubika_user_id=rubika_user_id,
+                    session_ref=session_ref,
+                )
             await db.commit()
             _STATES.pop(uid, None)
         except ValueError as exc:
-            await db.rollback(); await reply(event, f"❌ ثبت ناموفق: {exc}"); return True
+            await db.rollback()
+            await reply(event, f"❌ ثبت ناموفق: {exc}")
+            return True
+
     try:
         await runtime.connect(account)
         await reply(event, "✅ اکانت ثبت و Session متصل شد.")
