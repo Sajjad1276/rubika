@@ -2,11 +2,20 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, select
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, UniqueConstraint, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .models import Base, ListNetwork, User
+
+
+def enum_column(enum_cls):
+    return SAEnum(
+        enum_cls,
+        native_enum=False,
+        values_callable=lambda enum: [item.value for item in enum],
+        validate_strings=True,
+    )
 
 
 class OrderStatus(StrEnum):
@@ -51,7 +60,7 @@ class AdOrder(Base):
     retention_hours: Mapped[int] = mapped_column(Integer, default=6)
     unit_price: Mapped[int] = mapped_column(Integer)
     total_price: Mapped[int] = mapped_column(Integer)
-    status: Mapped[OrderStatus] = mapped_column(default=OrderStatus.DRAFT, index=True)
+    status: Mapped[OrderStatus] = mapped_column(enum_column(OrderStatus), default=OrderStatus.DRAFT, index=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -61,7 +70,7 @@ class Payment(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     order_id: Mapped[str] = mapped_column(ForeignKey("ad_orders.id"), unique=True, index=True)
     provider: Mapped[str] = mapped_column(String(32), default="manual")
-    status: Mapped[PaymentStatus] = mapped_column(default=PaymentStatus.PENDING, index=True)
+    status: Mapped[PaymentStatus] = mapped_column(enum_column(PaymentStatus), default=PaymentStatus.PENDING, index=True)
     amount: Mapped[int] = mapped_column(Integer)
     provider_reference: Mapped[str | None] = mapped_column(String(255), unique=True)
     idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
@@ -147,12 +156,10 @@ class CommerceService:
         existing = await self.db.scalar(select(Payment).where(Payment.order_id == order_id))
         if existing:
             return existing
-
         key = idempotency_key or f"payment:{order_id}"
         key_owner = await self.db.scalar(select(Payment).where(Payment.idempotency_key == key))
         if key_owner is not None and key_owner.order_id != order_id:
             raise ValueError("idempotency_key is already associated with another order")
-
         payment = Payment(order_id=order.id, amount=order.total_price, idempotency_key=key)
         self.db.add(payment)
         await self.db.flush()
@@ -177,14 +184,11 @@ class CommerceService:
             raise ValueError("Order not found")
         if order.status not in {OrderStatus.AWAITING_PAYMENT, OrderStatus.PAID, OrderStatus.SCHEDULED, OrderStatus.RUNNING}:
             raise ValueError(f"Cannot activate order from state {order.status}")
-
         if provider_reference:
-            duplicate = await self.db.scalar(
-                select(Payment).where(
-                    Payment.provider_reference == provider_reference,
-                    Payment.id != payment.id,
-                )
-            )
+            duplicate = await self.db.scalar(select(Payment).where(
+                Payment.provider_reference == provider_reference,
+                Payment.id != payment.id,
+            ))
             if duplicate is not None:
                 raise ValueError("provider_reference is already associated with another payment")
 
