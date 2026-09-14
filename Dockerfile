@@ -11,9 +11,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
+COPY main.py ./main.py
 COPY src ./src
 
 RUN python -m pip install --upgrade pip setuptools wheel \
     && python -m pip install .
 
-CMD ["python", "-m", "ad_network.main"]
+CMD ["python", "main.py"]
