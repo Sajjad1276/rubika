@@ -78,6 +78,8 @@ class RetentionMonitor:
             await self.db.flush()
             return False
 
-        target.status = "failed"
+        # The retention contract has already been fulfilled. Missing after the
+        # deadline is therefore a successful terminal state, not a new violation.
+        target.status = "retained"
         await self.db.flush()
-        return False
+        return True
