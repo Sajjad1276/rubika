@@ -15,6 +15,11 @@ def first_attr(obj: Any, *names: str, default: Any = None) -> Any:
 
 
 def update_user_id(msg: Any) -> str | None:
+    # Normal message updates expose the sender on the nested message object.
+    # Button updates expose sender_id directly on UpdateButton.
+    direct = first_attr(msg, "sender_id", "author_object_guid", "author_guid", "user_guid")
+    if direct:
+        return str(direct)
     event = first_attr(msg, "new_message", default=msg)
     return first_attr(event, "author_object_guid", "author_guid", "user_guid", "chat_id")
 
@@ -25,18 +30,22 @@ def update_text(msg: Any) -> str:
 
 
 def button_id(msg: Any) -> str:
+    # FastRub UpdateButton has button_id directly. Older/nested update shapes
+    # may expose it through aux_data or the nested message object.
+    direct = first_attr(msg, "button_id", default=None)
+    if direct:
+        return str(direct)
     event = first_attr(msg, "new_message", default=msg)
+    direct = first_attr(event, "button_id", default=None)
+    if direct:
+        return str(direct)
     aux = first_attr(event, "aux_data", default=None)
     return str(first_attr(aux, "button_id", default="") or "")
 
 
 def inline_keyboard(*rows: tuple[tuple[str, str], ...]):
-    if len(rows) == 1 and rows[0] and isinstance(rows[0][0], tuple):
-        normalized = rows
-    else:
-        normalized = rows
     keypad = KeyPad()
-    for row in normalized:
+    for row in rows:
         keypad.append(*(keypad.simple(button, label) for button, label in row))
     return keypad.build()
 
