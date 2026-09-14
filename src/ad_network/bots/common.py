@@ -17,8 +17,6 @@ def first_attr(obj: Any, *names: str, default: Any = None) -> Any:
 
 
 def update_user_id(msg: Any) -> str | None:
-    # Normal message updates expose the sender on the nested message object.
-    # Button updates expose sender_id directly on UpdateButton.
     direct = first_attr(msg, "sender_id", "author_object_guid", "author_guid", "user_guid")
     event = first_attr(msg, "new_message", default=msg)
     user_id = direct or first_attr(event, "author_object_guid", "author_guid", "user_guid", "chat_id")
@@ -40,8 +38,6 @@ def update_text(msg: Any) -> str:
 
 
 def button_id(msg: Any) -> str:
-    # FastRub UpdateButton has button_id directly. Older/nested update shapes
-    # may expose it through aux_data or the nested message object.
     direct = first_attr(msg, "button_id", default=None)
     if direct:
         return str(direct)
@@ -53,25 +49,34 @@ def button_id(msg: Any) -> str:
     return str(first_attr(aux, "button_id", default="") or "")
 
 
-def inline_keyboard(*rows: tuple[tuple[str, str], ...]):
+def _build_keyboard(rows: tuple[tuple[str, str], ...], *, callback: bool) -> Any:
     keypad = KeyPad()
     for row in rows:
         keypad.append(*(keypad.simple(button, label) for button, label in row))
     return keypad.build()
 
 
-async def reply(msg: Any, text: str, *, inline_keypad: Any = None) -> Any:
+def inline_keyboard(*rows: tuple[tuple[str, str], ...]):
+    return _build_keyboard(rows, callback=True)
+
+
+def quick_keyboard(*rows: tuple[tuple[str, str], ...]):
+    """Build a normal Rubika reply/chat keyboard (not inline)."""
+    return _build_keyboard(rows, callback=False)
+
+
+async def reply(msg: Any, text: str, *, inline_keypad: Any = None, keypad: Any = None) -> Any:
     method = getattr(msg, "reply", None)
-    if method is not None:
-        if inline_keypad is not None:
-            return await method(text, inline_keypad=inline_keypad)
-        return await method(text)
-    method = getattr(msg, "send_text", None)
-    if method is not None:
-        if inline_keypad is not None:
-            return await method(text, inline_keypad=inline_keypad)
-        return await method(text)
-    raise RuntimeError("FastRub update does not expose reply/send_text")
+    if method is None:
+        method = getattr(msg, "send_text", None)
+    if method is None:
+        raise RuntimeError("FastRub update does not expose reply/send_text")
+    kwargs = {}
+    if inline_keypad is not None:
+        kwargs["inline_keypad"] = inline_keypad
+    if keypad is not None:
+        kwargs["keypad"] = keypad
+    return await method(text, **kwargs)
 
 
 @dataclass(frozen=True)
