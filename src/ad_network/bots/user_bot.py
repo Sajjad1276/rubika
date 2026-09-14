@@ -11,7 +11,7 @@ from ..core.models import Channel, ListNetwork, RegistrationSource
 from ..core.payments import prepare_payment
 from ..core.roles import RoleService
 from ..core.services import RegistrationService
-from .common import button_id, inline_keyboard, quick_keyboard, reply, update_text, update_user_id
+from .common import button_id, inline_keyboard, is_duplicate_update, quick_keyboard, reply, update_text, update_user_id
 
 CHANNEL_RE = re.compile(r"(?:https?://)?(?:rubika\.ir/)?(@?[A-Za-z0-9_]+)$")
 
@@ -21,6 +21,7 @@ def main_keyboard():
         (("register", "📺 ثبت کانال"), ("status", "📊 وضعیت کانال")),
         (("ad", "📢 درخواست تبلیغ"), ("prices", "💰 تعرفه‌ها")),
         (("support", "🆘 پشتیبانی"),),
+        (("back", "↩️ بازگشت"),),
     )
 
 
@@ -63,14 +64,17 @@ async def build_user_bot(settings: Settings) -> Client:
     @register.entry_form(RegisterForm, commands=["register"])
     async def register_done(message, data):
         user_id = update_user_id(message)
-        if not user_id: return Conversation.END
+        if not user_id:
+            return Conversation.END
         async with SessionFactory() as db:
             user = await RoleService(db, settings).get_or_create_user(rubika_user_id=user_id)
             channel_ref = data["channel"].strip()
             raw_code = data["list_code"].strip().lstrip("#")
             network_list = await db.scalar(select(ListNetwork).where(ListNetwork.code == raw_code))
             if network_list is None:
-                await db.rollback(); await reply(message, "❌ کد لیست پیدا نشد."); return Conversation.END
+                await db.rollback()
+                await reply(message, "❌ کد لیست پیدا نشد.", keypad=main_keyboard())
+                return Conversation.END
             request = await RegistrationService(db).start(rubika_guid=channel_ref, applicant=user, source=RegistrationSource.SELF, list_id=network_list.id)
             await RegistrationService(db).submit_for_verification(request)
             await db.commit()
@@ -80,13 +84,16 @@ async def build_user_bot(settings: Settings) -> Client:
     @ad.entry_form(AdForm, commands=["ad"])
     async def ad_done(message, data):
         user_id = update_user_id(message)
-        if not user_id: return Conversation.END
+        if not user_id:
+            return Conversation.END
         async with SessionFactory() as db:
             user = await RoleService(db, settings).get_or_create_user(rubika_user_id=user_id)
             raw_code = data["list_code"].strip().lstrip("#")
             network_list = await db.scalar(select(ListNetwork).where(ListNetwork.code == raw_code))
             if network_list is None:
-                await db.rollback(); await reply(message, "❌ کد لیست پیدا نشد."); return Conversation.END
+                await db.rollback()
+                await reply(message, "❌ کد لیست پیدا نشد.", keypad=main_keyboard())
+                return Conversation.END
             try:
                 service = CommerceService(db)
                 unit, total = await service.quote(list_id=network_list.id, channel_count=int(data["channel_count"]), retention_hours=int(data["retention_hours"]))
@@ -94,7 +101,9 @@ async def build_user_bot(settings: Settings) -> Client:
                                                     channel_count=int(data["channel_count"]), retention_hours=int(data["retention_hours"]))
                 payment = await prepare_payment(db, order)
             except ValueError as exc:
-                await db.rollback(); await reply(message, f"⛔ سفارش ایجاد نشد: {exc}"); return Conversation.END
+                await db.rollback()
+                await reply(message, f"⛔ سفارش ایجاد نشد: {exc}", keypad=main_keyboard())
+                return Conversation.END
             await db.commit()
             await reply(message, "💳 سفارش آماده پرداخت شد\n\n"
                          f"لیست: {network_list.code} | تعداد: {order.channel_count}\n"
@@ -117,24 +126,39 @@ async def build_user_bot(settings: Settings) -> Client:
         await reply(message, "✅ درخواست پشتیبانی ثبت شد.", keypad=main_keyboard())
         return Conversation.END
 
-    for conversation in (register, ad, status, support): bot.add_conversation(conversation)
+    for conversation in (register, ad, status, support):
+        bot.add_conversation(conversation)
 
     @bot.on_button()
     async def on_button(message):
+        if is_duplicate_update(message):
+            return
         action = button_id(message)
         prompts = {"register": "/register", "ad": "/ad", "status": "/status", "support": "/support"}
-        if action == "home": await send_main(message)
-        elif action in prompts: await reply(message, f"برای شروع: {prompts[action]}")
-        elif action == "prices": await reply(message, "💰 تعرفه بر اساس لیست، تعداد کانال و مدت ماندگاری در /ad محاسبه می‌شود.")
+        if action == "home" or action == "back":
+            await send_main(message)
+        elif action in prompts:
+            await reply(message, f"برای شروع: {prompts[action]}", keypad=main_keyboard())
+        elif action == "prices":
+            await reply(message, "💰 تعرفه بر اساس لیست، تعداد کانال و مدت ماندگاری در /ad محاسبه می‌شود.", keypad=main_keyboard())
 
     @bot.on_message()
     async def handle(message):
+        if is_duplicate_update(message):
+            return
         text = update_text(message)
-        if text in {"/start", "شروع", "منو", "menu"}: await send_main(message)
-        elif text == "📺 ثبت کانال": await reply(message, "برای شروع: /register")
-        elif text == "📢 درخواست تبلیغ": await reply(message, "برای شروع: /ad")
-        elif text == "📊 وضعیت کانال": await reply(message, "برای شروع: /status")
-        elif text == "🆘 پشتیبانی": await reply(message, "برای شروع: /support")
-        elif text == "💰 تعرفه‌ها": await reply(message, "💰 تعرفه بر اساس لیست، تعداد کانال و مدت ماندگاری در /ad محاسبه می‌شود.", keypad=main_keyboard())
+        if text in {"/start", "شروع", "منو", "menu", "↩️ بازگشت"}:
+            await send_main(message)
+        elif text in {"📺 ثبت کانال", "📢 درخواست تبلیغ", "📊 وضعیت کانال", "🆘 پشتیبانی", "💰 تعرفه‌ها"}:
+            mapping = {
+                "📺 ثبت کانال": "/register",
+                "📢 درخواست تبلیغ": "/ad",
+                "📊 وضعیت کانال": "/status",
+                "🆘 پشتیبانی": "/support",
+            }
+            if text in mapping:
+                await reply(message, f"برای شروع: {mapping[text]}", keypad=main_keyboard())
+            else:
+                await reply(message, "💰 تعرفه بر اساس لیست، تعداد کانال و مدت ماندگاری در /ad محاسبه می‌شود.", keypad=main_keyboard())
 
     return bot
