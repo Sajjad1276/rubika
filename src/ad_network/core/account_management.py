@@ -19,17 +19,23 @@ class AccountManagementService:
     @staticmethod
     def resolve_session_path(session_ref: str) -> Path:
         path = Path(session_ref).expanduser()
-        if path.is_absolute():
+        if not path.is_absolute():
+            path = Path(get_settings().rubika_session_dir).expanduser() / path
+        if path.exists():
             return path
-        return Path(get_settings().rubika_session_dir).expanduser() / path
+        if path.suffix != ".max":
+            candidate = path.with_name(path.name + ".max")
+            if candidate.exists():
+                return candidate
+        return path
 
     async def get_by_code(self, code: str) -> ListNetwork | None:
         return await self.db.scalar(
-            select(ListNetwork).where(ListNetwork.code == code, ListNetwork.active.is_(True))
+            select(ListNetwork).where(ListNetwork.code == code.lstrip("#"), ListNetwork.active.is_(True))
         )
 
     async def attach(self, *, list_code: str, rubika_user_id: str, session_ref: str) -> ListAccount:
-        if not self.resolve_session_path(session_ref).exists():
+        if not self.resolve_session_path(session_ref).is_file():
             raise ValueError(f"Session file does not exist: {session_ref}")
         network = await self.get_by_code(list_code)
         if network is None:
@@ -43,7 +49,7 @@ class AccountManagementService:
         return account
 
     async def replace(self, account_id: str, *, rubika_user_id: str, session_ref: str) -> ListAccount:
-        if not self.resolve_session_path(session_ref).exists():
+        if not self.resolve_session_path(session_ref).is_file():
             raise ValueError(f"Session file does not exist: {session_ref}")
         account = await ListAccountService(self.db).replace(
             account_id,
