@@ -12,6 +12,8 @@ from .core.list_accounts import ListAccountResolver
 from .core.models import ListAccount
 from .core.network_worker import NetworkWorker
 
+STARTUP_TIMEOUT_SECONDS = 45
+
 
 async def load_active_list_accounts() -> list[ListAccount]:
     async with SessionFactory() as db:
@@ -54,17 +56,30 @@ def configure_fastrub_http() -> None:
     Network._ad_network_http1_patch = True
 
 
-async def prepare_bot(bot) -> None:
-    """Start FastRub and restore update flags reset by Client.start()."""
-    await bot.start()
+async def prepare_bot(name: str, bot) -> None:
+    """Start FastRub with a bounded timeout and restore polling flags."""
+    logging.info("[%s] starting FastRub client", name)
+    try:
+        await asyncio.wait_for(bot.start(), timeout=STARTUP_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError as exc:
+        logging.error(
+            "[%s] FastRub client.start() timed out after %.0fs",
+            name,
+            STARTUP_TIMEOUT_SECONDS,
+        )
+        raise RuntimeError(
+            f"{name} bot startup timed out after {STARTUP_TIMEOUT_SECONDS}s"
+        ) from exc
     bot._fetch_messages_polling = True
     bot._fetch_buttons = True
+    logging.info("[%s] FastRub client started; polling flags restored", name)
 
 
 async def main() -> None:
     configure_logging()
     settings = get_settings()
     await init_database()
+    logging.info("[BOOT] Database ready")
 
     if not all((settings.user_bot_token, settings.admin_bot_token, settings.owner_bot_token)):
         raise RuntimeError("USER_BOT_TOKEN, ADMIN_BOT_TOKEN and OWNER_BOT_TOKEN must all be configured")
@@ -73,6 +88,7 @@ async def main() -> None:
 
     # Patch FastRub before ListAccountRuntime can create any user-bot clients.
     configure_fastrub_http()
+    logging.info("[BOOT] FastRub HTTP transport configured")
 
     logging.info("Starting three-bot Rubika advertising network")
 
@@ -81,17 +97,25 @@ async def main() -> None:
     worker = NetworkWorker(account_resolver)
     stop = asyncio.Event()
 
-    await account_runtime.sync_active_accounts(await load_active_list_accounts())
+    active_list_accounts = await load_active_list_accounts()
+    logging.info("[BOOT] Loaded %d active List accounts", len(active_list_accounts))
+    await account_runtime.sync_active_accounts(active_list_accounts)
+    logging.info("[BOOT] List account runtime synchronized")
 
+    logging.info("[BOOT] Building user bot")
     user_bot = await build_user_bot(settings)
+    logging.info("[BOOT] Building admin bot")
     admin_bot = await build_admin_bot(settings, account_resolver, account_runtime)
+    logging.info("[BOOT] Building owner bot")
     owner_bot = await build_owner_bot(settings)
+    logging.info("[BOOT] All bots built")
 
     await asyncio.gather(
-        prepare_bot(user_bot),
-        prepare_bot(admin_bot),
-        prepare_bot(owner_bot),
+        prepare_bot("user", user_bot),
+        prepare_bot("admin", admin_bot),
+        prepare_bot("owner", owner_bot),
     )
+    logging.info("[BOOT] All three bots started")
 
     tasks = [
         asyncio.create_task(user_bot.run(), name="user-bot"),
