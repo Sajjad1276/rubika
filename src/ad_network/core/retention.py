@@ -13,8 +13,14 @@ class RetentionService:
         self.db = db
 
     @staticmethod
-    def due_at(published_at: datetime, retention_hours: int) -> datetime:
-        return published_at + timedelta(hours=retention_hours)
+    def _aware(value: datetime) -> datetime:
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+    @classmethod
+    def due_at(cls, published_at: datetime, retention_hours: int) -> datetime:
+        if retention_hours <= 0:
+            raise ValueError("retention_hours must be positive")
+        return cls._aware(published_at) + timedelta(hours=retention_hours)
 
     async def record_early_deletion(
         self,
@@ -35,8 +41,7 @@ class RetentionService:
         return violation
 
     async def should_be_retained(self, published_at: datetime, retention_hours: int) -> bool:
-        now = datetime.now(timezone.utc)
-        return now < self.due_at(published_at, retention_hours)
+        return datetime.now(timezone.utc) < self.due_at(published_at, retention_hours)
 
     async def channel_is_active(self, channel_id: str) -> bool:
         channel = await self.db.scalar(select(Channel).where(Channel.id == channel_id))
