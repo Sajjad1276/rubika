@@ -74,34 +74,37 @@ async def main() -> None:
     account_runtime = ListAccountRuntime(account_resolver)
     worker = NetworkWorker(account_resolver)
     stop = asyncio.Event()
-
-    active_list_accounts = await load_active_list_accounts()
-    logging.info("[BOOT] Loaded %d active List accounts", len(active_list_accounts))
-    await account_runtime.sync_active_accounts(active_list_accounts)
-    logging.info("[BOOT] List account runtime synchronized")
-
-    logging.info("[BOOT] Building user bot")
-    user_bot = await build_user_bot(settings)
-    logging.info("[BOOT] Building admin bot")
-    admin_bot = await build_admin_bot(settings, account_resolver, account_runtime)
-    logging.info("[BOOT] Building owner bot")
-    owner_bot = await build_owner_bot(settings)
-    logging.info("[BOOT] All bots built")
-
-    tasks = [
-        asyncio.create_task(run_bot_isolated("user", user_bot, stop), name="user-bot"),
-        asyncio.create_task(run_bot_isolated("admin", admin_bot, stop), name="admin-bot"),
-        asyncio.create_task(run_bot_isolated("owner", owner_bot, stop), name="owner-bot"),
-        asyncio.create_task(worker.run(), name="network-worker"),
-        asyncio.create_task(sync_list_accounts(account_runtime, stop), name="list-account-sync"),
-    ]
+    user_bot = admin_bot = owner_bot = None
+    tasks: list[asyncio.Task] = []
 
     try:
+        active_list_accounts = await load_active_list_accounts()
+        logging.info("[BOOT] Loaded %d active List accounts", len(active_list_accounts))
+        await account_runtime.sync_active_accounts(active_list_accounts)
+        logging.info("[BOOT] List account runtime synchronized")
+
+        logging.info("[BOOT] Building user bot")
+        user_bot = await build_user_bot(settings)
+        logging.info("[BOOT] Building admin bot")
+        admin_bot = await build_admin_bot(settings, account_resolver, account_runtime)
+        logging.info("[BOOT] Building owner bot")
+        owner_bot = await build_owner_bot(settings)
+        logging.info("[BOOT] All bots built")
+
+        tasks = [
+            asyncio.create_task(run_bot_isolated("user", user_bot, stop), name="user-bot"),
+            asyncio.create_task(run_bot_isolated("admin", admin_bot, stop), name="admin-bot"),
+            asyncio.create_task(run_bot_isolated("owner", owner_bot, stop), name="owner-bot"),
+            asyncio.create_task(worker.run(), name="network-worker"),
+            asyncio.create_task(sync_list_accounts(account_runtime, stop), name="list-account-sync"),
+        ]
         await asyncio.gather(*tasks)
     finally:
         stop.set()
         await worker.stop()
         for bot in (user_bot, admin_bot, owner_bot):
+            if bot is None:
+                continue
             close = getattr(bot, "close", None)
             if callable(close):
                 try:
@@ -111,7 +114,8 @@ async def main() -> None:
         for task in tasks:
             if not task.done():
                 task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         for account_id in list(account_resolver.clients):
             try:
                 await account_runtime.disconnect(account_id)
