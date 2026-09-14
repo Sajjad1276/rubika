@@ -7,7 +7,16 @@ from ..core.commerce import AdOrder, CommerceService, EarningsEntry, Payment, Pa
 from ..core.config import Settings
 from ..core.db import SessionFactory
 from ..core.list_accounts import ListAccountResolver, ListAccountService
-from ..core.models import Channel, RegistrationRequest, RegistrationStatus, UserRole, Violation
+from ..core.models import (
+    Channel,
+    RegistrationRequest,
+    RegistrationSource,
+    RegistrationStatus,
+    Task,
+    TaskStatus,
+    UserRole,
+    Violation,
+)
 from ..core.roles import RoleService
 from ..core.services import RegistrationService, VerificationService
 from .account_routes import account_button, account_text
@@ -115,6 +124,31 @@ async def build_admin_bot(
             keypad=admin_keyboard(),
         )
 
+    async def show_tasks(event, user_id: str):
+        async with SessionFactory() as db:
+            tasks = list((await db.scalars(select(Task).where(
+                Task.assignee_id == user_id,
+                Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+            ).order_by(Task.created_at.desc()).limit(20))).all())
+            lines = [
+                f"{task.id[:8]} | {task.task_type} | {task.status.value if hasattr(task.status, 'value') else task.status}"
+                for task in tasks
+            ]
+        await reply(event, "📋 وظایف من\n\n" + ("\n".join(lines) or "وظیفه‌ای در صف نیست."), keypad=admin_keyboard())
+
+    async def show_recruitment(event):
+        async with SessionFactory() as db:
+            rows = list((await db.scalars(select(RegistrationRequest).where(
+                RegistrationRequest.source == RegistrationSource.ADMIN_RECRUITED,
+                RegistrationRequest.status.in_([RegistrationStatus.DRAFT, RegistrationStatus.PENDING_VERIFICATION]),
+            ).order_by(RegistrationRequest.created_at.desc()).limit(20))).all())
+            pending_verification = sum(row.status == RegistrationStatus.PENDING_VERIFICATION for row in rows)
+        await reply(
+            event,
+            f"🎯 جذب کانال\n\nسرنخ‌های باز: {len(rows)}\nدر انتظار احراز: {pending_verification}\n\nثبت جذب از مسیر عملیاتی درخواست انجام می‌شود.",
+            keypad=admin_keyboard(),
+        )
+
     async def handle_action(event, action: str):
         user_id = await resolve_user(bot, event)
         if not user_id:
@@ -149,6 +183,14 @@ async def build_admin_bot(
                 await db.commit(); await show_violations(event); return
             if action == "performance":
                 await db.commit(); await show_performance(event); return
+            if action == "tasks":
+                await db.commit(); await show_tasks(event, user.id); return
+            if action == "recruit":
+                await db.commit(); await show_recruitment(event); return
+            if action == "training":
+                await db.commit()
+                await reply(event, "🎓 آموزش شبکه\n\n1) احراز دسترسی کانال\n2) بررسی اکانت عملیاتی لیست\n3) تأیید پرداخت\n4) پایش ماندگاری\n5) ثبت تخلف و پیگیری آن", keypad=admin_keyboard())
+                return
             if action.startswith("payment:"):
                 payment = await db.get(Payment, action.split(":", 1)[1])
                 order = await db.get(AdOrder, payment.order_id) if payment else None
@@ -236,13 +278,6 @@ async def build_admin_bot(
                     await db.commit(); await reply(event, "🚫 درخواست رد شد.", keypad=admin_keyboard())
                 return
             await db.commit()
-            responses = {
-                "tasks": "📋 وظایف امروز در صف هستند.",
-                "recruit": "🎯 سرنخ‌های جذب کانال در حال جمع‌آوری است.",
-                "training": "🎓 آموزش مرحله‌ای شبکه فعال است.",
-            }
-            if action in responses:
-                await reply(event, responses[action], keypad=admin_keyboard())
 
     @bot.on_callback()
     async def on_callback(bot, event):
