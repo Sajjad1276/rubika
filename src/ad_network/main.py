@@ -36,12 +36,7 @@ async def sync_list_accounts(runtime: ListAccountRuntime, stop: asyncio.Event) -
 
 
 def configure_fastrub_http() -> None:
-    """Force FastRub's Network transport to HTTP/1.1 before Client.start().
-
-    FastRub creates ``bot.network`` inside ``Client.start()``, so patching an
-    individual bot before start is too early. Patch the Network class once,
-    then every bot gets a stable HTTP/1.1 client when it is initialized.
-    """
+    """Force FastRub's Network transport to HTTP/1.1 before any client starts."""
     from fast_rub.network.network import Network
 
     if getattr(Network, "_ad_network_http1_patch", False):
@@ -60,7 +55,7 @@ def configure_fastrub_http() -> None:
 
 
 async def prepare_bot(bot) -> None:
-    """Start FastRub and restore polling flags reset by Client.start()."""
+    """Start FastRub and restore update flags reset by Client.start()."""
     await bot.start()
     bot._fetch_messages_polling = True
     bot._fetch_buttons = True
@@ -76,6 +71,9 @@ async def main() -> None:
     if not settings.owner_id:
         raise RuntimeError("OWNER_ID must be configured")
 
+    # Patch FastRub before ListAccountRuntime can create any user-bot clients.
+    configure_fastrub_http()
+
     logging.info("Starting three-bot Rubika advertising network")
 
     account_resolver = ListAccountResolver()
@@ -88,8 +86,6 @@ async def main() -> None:
     user_bot = await build_user_bot(settings)
     admin_bot = await build_admin_bot(settings, account_resolver, account_runtime)
     owner_bot = await build_owner_bot(settings)
-
-    configure_fastrub_http()
 
     await asyncio.gather(
         prepare_bot(user_bot),
