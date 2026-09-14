@@ -54,8 +54,8 @@ def _first_value(data: Any, *keys: str) -> Any:
     return None
 
 
-class FastRubikaGateway:
-    """Adapter around FastRub's bundled pyrubi user-bot client."""
+class MaxRubikaGateway:
+    """Adapter around MAXRubika Messenger for operational List accounts."""
 
     def __init__(self, client: Any):
         self.client = client
@@ -65,7 +65,7 @@ class FastRubikaGateway:
         chat = data.get("channel", data) if isinstance(data, dict) else {}
         return ChannelSnapshot(
             guid=guid,
-            title=_first_value(chat, "title", "name"),
+            title=_first_value(chat, "title", "name", "channel_title"),
             username=_first_value(chat, "username", "user_name"),
             member_count=_first_int(chat, "members_count", "member_count", "participants_count"),
         )
@@ -78,7 +78,6 @@ class FastRubikaGateway:
             members = raw.get("in_chat_members") or raw.get("members") or raw.get("admins") or []
         elif isinstance(raw, list):
             members = raw
-
         for member in members:
             item = _raw(member)
             if not isinstance(item, dict):
@@ -101,7 +100,6 @@ class FastRubikaGateway:
                 can_delete=bool({"delete", "delete_message", "post_edit_delete_message"} & permissions),
                 raw={"member": item, "access": access},
             )
-
         return AccessSnapshot(user_id=user_id, is_admin=False, can_send=False, can_edit=False, can_delete=False, raw=raw)
 
     async def forward(self, source_guid: str, target_guid: str, message_id: str) -> Any:
@@ -115,3 +113,6 @@ class FastRubikaGateway:
 
     async def get_message(self, object_guid: str, message_id: str) -> Any:
         return await self.client.get_messages_by_id(object_guid, [message_id])
+
+
+FastRubikaGateway = MaxRubikaGateway
