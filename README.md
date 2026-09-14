@@ -40,7 +40,7 @@ This means adding or removing List accounts does not require restarting the Rail
 ## Implemented layers
 
 - Async SQLAlchemy persistence with PostgreSQL/SQLite support
-- FastRub transport adapter
+- MAXRubika transport and bot adapter
 - Central roles and permissions
 - Persistent per-bot conversation state
 - Unified self-registration/admin-recruitment workflow
@@ -81,16 +81,19 @@ DATABASE_URL=<Railway PostgreSQL URL>
 USER_BOT_TOKEN=<user bot token>
 ADMIN_BOT_TOKEN=<admin bot token>
 OWNER_BOT_TOKEN=<owner bot token>
-OWNER_ID=<Rubika owner user id>
+OWNER_USERNAME=<Rubika owner username>
+ADMIN_USERNAME=<Rubika admin username>
 RUBIKA_SESSION_DIR=/data/sessions
 LIST_ACCOUNT_SYNC_SECONDS=30
 ```
+
+`OWNER_ID` is retained only as a legacy compatibility setting and is not used for owner/admin authorization.
 
 Never commit real Rubika tokens or production credentials.
 
 ## Railway session storage
 
-Create a persistent Railway Volume and mount it at `/data`. Store each operational account's FastRub/Pyrubi session under `/data/sessions` and save that path in the List account's `session_ref`.
+Create a persistent Railway Volume and mount it at `/data`. Store each operational account's MAXRubika session under `/data/sessions` and save that path in the List account's `session_ref`.
 
 Do not store session files in the Git repository or rely on the container's ephemeral filesystem.
 
