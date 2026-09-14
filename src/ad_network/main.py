@@ -12,8 +12,8 @@ from .core.list_accounts import ListAccountResolver
 from .core.models import ListAccount
 from .core.network_worker import NetworkWorker
 
-STARTUP_TIMEOUT_SECONDS = 45
 BOT_RETRY_DELAY_SECONDS = 5
+POLL_INTERVAL_SECONDS = 0.05
 
 
 async def load_active_list_accounts() -> list[ListAccount]:
@@ -38,56 +38,23 @@ async def sync_list_accounts(runtime: ListAccountRuntime, stop: asyncio.Event) -
             pass
 
 
-def configure_fastrub_http() -> None:
-    """Force FastRub's Network transport to HTTP/1.1 before any client starts."""
-    from fast_rub.network.network import Network
-
-    if getattr(Network, "_ad_network_http1_patch", False):
-        return
-
-    original_build_client_kwargs = Network._build_client_kwargs
-
-    def stable_client_kwargs(self):
-        kwargs = original_build_client_kwargs(self)
-        kwargs["http1"] = True
-        kwargs["http2"] = False
-        return kwargs
-
-    Network._build_client_kwargs = stable_client_kwargs
-    Network._ad_network_http1_patch = True
-
-
-async def prepare_bot(name: str, bot) -> None:
-    """Start FastRub with a bounded timeout and restore polling flags."""
-    logging.info("[%s] starting FastRub client", name)
-    try:
-        await asyncio.wait_for(bot.start(), timeout=STARTUP_TIMEOUT_SECONDS)
-    except asyncio.TimeoutError as exc:
-        logging.error(
-            "[%s] FastRub client.start() timed out after %.0fs",
-            name,
-            STARTUP_TIMEOUT_SECONDS,
-        )
-        raise RuntimeError(
-            f"{name} bot startup timed out after {STARTUP_TIMEOUT_SECONDS}s"
-        ) from exc
-    bot._fetch_messages_polling = True
-    bot._fetch_buttons = True
-    logging.info("[%s] FastRub client started; polling flags restored", name)
-
-
-async def run_bot_isolated(name: str, bot) -> None:
-    """Keep one bot's polling failures isolated from the other bots."""
-    while True:
+async def run_bot_isolated(name: str, bot, stop: asyncio.Event) -> None:
+    """Run one MAXRubika bot with isolated restart handling."""
+    while not stop.is_set():
         try:
-            logging.info("[%s] polling loop started", name)
-            await bot.run()
-            logging.warning("[%s] polling loop stopped; restarting", name)
+            logging.info("[%s] MAXRubika polling loop started", name)
+            await bot.start(poll_interval=POLL_INTERVAL_SECONDS)
+            if not stop.is_set():
+                logging.warning("[%s] polling loop stopped; restarting", name)
         except asyncio.CancelledError:
             raise
         except Exception:
             logging.exception("[%s] polling loop failed; retrying in %ss", name, BOT_RETRY_DELAY_SECONDS)
-        await asyncio.sleep(BOT_RETRY_DELAY_SECONDS)
+        if not stop.is_set():
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=BOT_RETRY_DELAY_SECONDS)
+            except asyncio.TimeoutError:
+                pass
 
 
 async def main() -> None:
@@ -98,14 +65,10 @@ async def main() -> None:
 
     if not all((settings.user_bot_token, settings.admin_bot_token, settings.owner_bot_token)):
         raise RuntimeError("USER_BOT_TOKEN, ADMIN_BOT_TOKEN and OWNER_BOT_TOKEN must all be configured")
-    if not settings.owner_id:
-        raise RuntimeError("OWNER_ID must be configured")
+    if not settings.owner_username or not settings.admin_username:
+        raise RuntimeError("OWNER_USERNAME and ADMIN_USERNAME must be configured")
 
-    # Patch FastRub before ListAccountRuntime can create any user-bot clients.
-    configure_fastrub_http()
-    logging.info("[BOOT] FastRub HTTP transport configured")
-
-    logging.info("Starting three-bot Rubika advertising network")
+    logging.info("Starting three-bot Rubika advertising network with MAXRubika")
 
     account_resolver = ListAccountResolver()
     account_runtime = ListAccountRuntime(account_resolver)
@@ -125,17 +88,10 @@ async def main() -> None:
     owner_bot = await build_owner_bot(settings)
     logging.info("[BOOT] All bots built")
 
-    await asyncio.gather(
-        prepare_bot("user", user_bot),
-        prepare_bot("admin", admin_bot),
-        prepare_bot("owner", owner_bot),
-    )
-    logging.info("[BOOT] All three bots started")
-
     tasks = [
-        asyncio.create_task(run_bot_isolated("user", user_bot), name="user-bot"),
-        asyncio.create_task(run_bot_isolated("admin", admin_bot), name="admin-bot"),
-        asyncio.create_task(run_bot_isolated("owner", owner_bot), name="owner-bot"),
+        asyncio.create_task(run_bot_isolated("user", user_bot, stop), name="user-bot"),
+        asyncio.create_task(run_bot_isolated("admin", admin_bot, stop), name="admin-bot"),
+        asyncio.create_task(run_bot_isolated("owner", owner_bot, stop), name="owner-bot"),
         asyncio.create_task(worker.run(), name="network-worker"),
         asyncio.create_task(sync_list_accounts(account_runtime, stop), name="list-account-sync"),
     ]
@@ -145,6 +101,13 @@ async def main() -> None:
     finally:
         stop.set()
         await worker.stop()
+        for bot in (user_bot, admin_bot, owner_bot):
+            close = getattr(bot, "close", None)
+            if callable(close):
+                try:
+                    await close()
+                except Exception:
+                    logging.exception("Failed to close MAXRubika bot")
         for task in tasks:
             if not task.done():
                 task.cancel()
