@@ -36,13 +36,24 @@ async def sync_list_accounts(runtime: ListAccountRuntime, stop: asyncio.Event) -
 
 
 async def prepare_bot(bot) -> None:
-    """Initialize FastRub before enabling decorators registered by the builders.
+    """Initialize FastRub with stable HTTP/1.1 polling transport.
 
-    FastRub initializes its update flags during start(). The project builders
-    register handlers before run(), so run() would otherwise reset those flags
-    and raise "No update types selected". Starting here preserves the already
-    registered handlers and explicitly enables the polling/button update loops.
+    Rubika's API can return transient 502 responses, and FastRub's HTTP/2
+    connection pool can then surface h2 state errors such as
+    RECV_WINDOW_UPDATE on an already closed connection. HTTP/1.1 is fully
+    sufficient for Bot API polling and lets FastRub recreate connections
+    cleanly after transient failures.
     """
+    original_build_client_kwargs = bot.network._build_client_kwargs
+
+    def stable_client_kwargs():
+        kwargs = original_build_client_kwargs()
+        kwargs["http1"] = True
+        kwargs["http2"] = False
+        return kwargs
+
+    bot.network._build_client_kwargs = stable_client_kwargs
+
     await bot.start()
     bot._fetch_messages_polling = True
     bot._fetch_buttons = True
