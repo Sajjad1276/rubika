@@ -13,6 +13,7 @@ from .core.models import ListAccount
 from .core.network_worker import NetworkWorker
 
 STARTUP_TIMEOUT_SECONDS = 45
+BOT_RETRY_DELAY_SECONDS = 5
 
 
 async def load_active_list_accounts() -> list[ListAccount]:
@@ -75,6 +76,20 @@ async def prepare_bot(name: str, bot) -> None:
     logging.info("[%s] FastRub client started; polling flags restored", name)
 
 
+async def run_bot_isolated(name: str, bot) -> None:
+    """Keep one bot's polling failures isolated from the other bots."""
+    while True:
+        try:
+            logging.info("[%s] polling loop started", name)
+            await bot.run()
+            logging.warning("[%s] polling loop stopped; restarting", name)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.exception("[%s] polling loop failed; retrying in %ss", name, BOT_RETRY_DELAY_SECONDS)
+        await asyncio.sleep(BOT_RETRY_DELAY_SECONDS)
+
+
 async def main() -> None:
     configure_logging()
     settings = get_settings()
@@ -118,20 +133,15 @@ async def main() -> None:
     logging.info("[BOOT] All three bots started")
 
     tasks = [
-        asyncio.create_task(user_bot.run(), name="user-bot"),
-        asyncio.create_task(admin_bot.run(), name="admin-bot"),
-        asyncio.create_task(owner_bot.run(), name="owner-bot"),
+        asyncio.create_task(run_bot_isolated("user", user_bot), name="user-bot"),
+        asyncio.create_task(run_bot_isolated("admin", admin_bot), name="admin-bot"),
+        asyncio.create_task(run_bot_isolated("owner", owner_bot), name="owner-bot"),
         asyncio.create_task(worker.run(), name="network-worker"),
         asyncio.create_task(sync_list_accounts(account_runtime, stop), name="list-account-sync"),
     ]
 
     try:
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
-        for task in done:
-            error = task.exception()
-            if error is not None:
-                raise error
-        await asyncio.gather(*pending)
+        await asyncio.gather(*tasks)
     finally:
         stop.set()
         await worker.stop()
