@@ -16,7 +16,7 @@ class AccountBinding:
 
 
 class ListAccountService:
-    """Persistent lifecycle for operational Rubika accounts assigned to Lists."""
+    """Persistent lifecycle for operational MAXRubika accounts assigned to Lists."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -80,7 +80,7 @@ class ListAccountService:
 
 
 class ListAccountResolver:
-    """Runtime registry of authenticated FastRub pyrubi clients."""
+    """Runtime registry of authenticated MAXRubika Messenger clients."""
 
     def __init__(self, clients: dict[str, Any] | None = None):
         self.clients = clients if clients is not None else {}
@@ -90,7 +90,7 @@ class ListAccountResolver:
             return self.clients[account.id]
         except KeyError as exc:
             raise RuntimeError(
-                f"No live Rubika client is bound to list account {account.id}"
+                f"No live MAXRubika client is bound to list account {account.id}"
             ) from exc
 
     def bind(self, account_id: str, client: Any) -> None:
