@@ -15,23 +15,16 @@ from .core.network_worker import NetworkWorker
 
 async def load_active_list_accounts() -> list[ListAccount]:
     async with SessionFactory() as db:
-        return list(
-            (
-                await db.scalars(
-                    select(ListAccount)
-                    .where(ListAccount.active.is_(True))
-                    .order_by(ListAccount.id)
-                )
-            ).all()
-        )
+        return list((await db.scalars(
+            select(ListAccount).where(ListAccount.active.is_(True)).order_by(ListAccount.id)
+        )).all())
 
 
 async def sync_list_accounts(runtime: ListAccountRuntime, stop: asyncio.Event) -> None:
     interval = max(5.0, get_settings().list_account_sync_seconds)
     while not stop.is_set():
         try:
-            accounts = await load_active_list_accounts()
-            await runtime.sync_active_accounts(accounts)
+            await runtime.sync_active_accounts(await load_active_list_accounts())
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -48,9 +41,7 @@ async def main() -> None:
     await init_database()
 
     if not all((settings.user_bot_token, settings.admin_bot_token, settings.owner_bot_token)):
-        raise RuntimeError(
-            "USER_BOT_TOKEN, ADMIN_BOT_TOKEN and OWNER_BOT_TOKEN must all be configured"
-        )
+        raise RuntimeError("USER_BOT_TOKEN, ADMIN_BOT_TOKEN and OWNER_BOT_TOKEN must all be configured")
     if not settings.owner_id:
         raise RuntimeError("OWNER_ID must be configured")
 
@@ -64,7 +55,7 @@ async def main() -> None:
     await account_runtime.sync_active_accounts(await load_active_list_accounts())
 
     user_bot = await build_user_bot(settings)
-    admin_bot = await build_admin_bot(settings, account_resolver)
+    admin_bot = await build_admin_bot(settings, account_resolver, account_runtime)
     owner_bot = await build_owner_bot(settings)
 
     tasks = [
@@ -89,7 +80,6 @@ async def main() -> None:
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-
         for account_id in list(account_resolver.clients):
             try:
                 await account_runtime.disconnect(account_id)
