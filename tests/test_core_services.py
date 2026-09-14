@@ -31,6 +31,14 @@ async def test_registration_approval_activates_channel_and_assigns_monotonic_cod
         list_id=network.id,
     )
     await service.submit_for_verification(request)
+
+    channel = await session.get(__import__("ad_network.core.models", fromlist=["Channel"]).Channel, request.channel_id)
+    channel.access_verified = True
+    channel.can_send = True
+    channel.can_edit = True
+    channel.can_delete = True
+    await session.flush()
+
     await service.verify(request, approved=True, verifier_id=user.id, member_count=250)
 
     assert request.status == RegistrationStatus.ACTIVE
