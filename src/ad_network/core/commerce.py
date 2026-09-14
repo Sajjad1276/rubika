@@ -6,7 +6,7 @@ from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, String, Te
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .models import Base, ListNetwork, User
+from .models import AuditLog, Base, ListNetwork, User
 
 
 def enum_column(enum_cls):
@@ -219,6 +219,16 @@ class CommerceService:
         now = datetime.now(timezone.utc)
         campaign.status = "scheduled" if start_at > now else "active"
         order.status = OrderStatus.SCHEDULED if campaign.status == "scheduled" else OrderStatus.RUNNING
+        self.db.add(AuditLog(
+            actor_id=confirmer_id,
+            action="payment_confirmed",
+            entity_type="payment",
+            entity_id=payment.id,
+            metadata_json=(
+                f'{{"order_id":"{order.id}","amount":{payment.amount},'
+                f'"provider_reference":{provider_reference!r}}}'
+            ),
+        ))
         await self.db.flush()
         return payment
 
@@ -277,6 +287,7 @@ class CommerceService:
             beneficiary_id=beneficiary_id,
             list_id=order.list_id,
             amount=amount,
+            entry_type="list_share",
         )
         self.db.add(entry)
         await self.db.flush()
