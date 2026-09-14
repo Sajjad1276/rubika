@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     owner_username: str = ""
     log_level: str = "INFO"
 
+    # Operational Rubika user-bot sessions. On Railway this should point to a
+    # mounted persistent Volume, for example /data/sessions.
+    rubika_session_dir: str = "./sessions"
+    list_account_sync_seconds: float = 30.0
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
