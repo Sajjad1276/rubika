@@ -92,23 +92,50 @@ class CommerceService:
         if channel_count <= 0 or retention_hours <= 0:
             raise ValueError("channel_count and retention_hours must be positive")
         rule = await self.db.scalar(select(PriceRule).where(
-            PriceRule.list_id == list_id, PriceRule.active.is_(True),
-            PriceRule.min_channels <= channel_count, PriceRule.retention_hours == retention_hours,
+            PriceRule.list_id == list_id,
+            PriceRule.active.is_(True),
+            PriceRule.min_channels <= channel_count,
+            PriceRule.retention_hours == retention_hours,
         ).order_by(PriceRule.min_channels.desc()))
         if rule is None:
             raise ValueError("No active price rule matches this request")
         return rule.price_per_channel, rule.price_per_channel * channel_count
 
-    async def create_order(self, *, advertiser: User, title: str, content_ref: str, list_id: str,
-                           channel_count: int, retention_hours: int = 6,
-                           scheduled_at: datetime | None = None) -> AdOrder:
+    async def create_order(
+        self,
+        *,
+        advertiser: User,
+        title: str,
+        content_ref: str,
+        list_id: str,
+        channel_count: int,
+        retention_hours: int = 6,
+        scheduled_at: datetime | None = None,
+    ) -> AdOrder:
+        if not title.strip():
+            raise ValueError("title cannot be empty")
+        if not content_ref.strip():
+            raise ValueError("content_ref cannot be empty")
         network_list = await self.db.get(ListNetwork, list_id)
         if network_list is None or not network_list.active:
             raise ValueError("Active list not found")
-        unit_price, total = await self.quote(list_id=list_id, channel_count=channel_count, retention_hours=retention_hours)
-        order = AdOrder(advertiser_id=advertiser.id, title=title, content_ref=content_ref, list_id=list_id,
-                        channel_count=channel_count, retention_hours=retention_hours, unit_price=unit_price,
-                        total_price=total, status=OrderStatus.AWAITING_PAYMENT, scheduled_at=scheduled_at)
+        unit_price, total = await self.quote(
+            list_id=list_id,
+            channel_count=channel_count,
+            retention_hours=retention_hours,
+        )
+        order = AdOrder(
+            advertiser_id=advertiser.id,
+            title=title.strip(),
+            content_ref=content_ref.strip(),
+            list_id=list_id,
+            channel_count=channel_count,
+            retention_hours=retention_hours,
+            unit_price=unit_price,
+            total_price=total,
+            status=OrderStatus.AWAITING_PAYMENT,
+            scheduled_at=scheduled_at,
+        )
         self.db.add(order)
         await self.db.flush()
         return order
@@ -120,14 +147,24 @@ class CommerceService:
         existing = await self.db.scalar(select(Payment).where(Payment.order_id == order_id))
         if existing:
             return existing
-        payment = Payment(order_id=order.id, amount=order.total_price,
-                          idempotency_key=idempotency_key or f"payment:{order_id}")
+
+        key = idempotency_key or f"payment:{order_id}"
+        key_owner = await self.db.scalar(select(Payment).where(Payment.idempotency_key == key))
+        if key_owner is not None and key_owner.order_id != order_id:
+            raise ValueError("idempotency_key is already associated with another order")
+
+        payment = Payment(order_id=order.id, amount=order.total_price, idempotency_key=key)
         self.db.add(payment)
         await self.db.flush()
         return payment
 
-    async def confirm_payment(self, payment_id: str, *, confirmer_id: str,
-                              provider_reference: str | None = None) -> Payment:
+    async def confirm_payment(
+        self,
+        payment_id: str,
+        *,
+        confirmer_id: str,
+        provider_reference: str | None = None,
+    ) -> Payment:
         payment = await self.db.get(Payment, payment_id)
         if payment is None:
             raise ValueError("Payment not found")
@@ -138,6 +175,18 @@ class CommerceService:
         order = await self.db.get(AdOrder, payment.order_id)
         if order is None:
             raise ValueError("Order not found")
+        if order.status not in {OrderStatus.AWAITING_PAYMENT, OrderStatus.PAID, OrderStatus.SCHEDULED, OrderStatus.RUNNING}:
+            raise ValueError(f"Cannot activate order from state {order.status}")
+
+        if provider_reference:
+            duplicate = await self.db.scalar(
+                select(Payment).where(
+                    Payment.provider_reference == provider_reference,
+                    Payment.id != payment.id,
+                )
+            )
+            if duplicate is not None:
+                raise ValueError("provider_reference is already associated with another payment")
 
         from .campaigns import CampaignService
 
@@ -163,13 +212,21 @@ class CommerceService:
         payment.confirmed_at = datetime.now(timezone.utc)
         if provider_reference:
             payment.provider_reference = provider_reference
-        campaign.status = "scheduled" if start_at > datetime.now(timezone.utc) else "active"
+        now = datetime.now(timezone.utc)
+        campaign.status = "scheduled" if start_at > now else "active"
         order.status = OrderStatus.SCHEDULED if campaign.status == "scheduled" else OrderStatus.RUNNING
         await self.db.flush()
         return payment
 
-    async def settle(self, order: AdOrder, *, list_beneficiary_id: str | None, admin_beneficiary_id: str | None,
-                     list_percent: int = 70, admin_percent: int = 20) -> list[EarningsEntry]:
+    async def settle(
+        self,
+        order: AdOrder,
+        *,
+        list_beneficiary_id: str | None,
+        admin_beneficiary_id: str | None,
+        list_percent: int = 70,
+        admin_percent: int = 20,
+    ) -> list[EarningsEntry]:
         if order.status not in {OrderStatus.PAID, OrderStatus.SCHEDULED, OrderStatus.RUNNING, OrderStatus.COMPLETED}:
             raise ValueError("Only paid or executed orders can be settled")
         if list_percent < 0 or admin_percent < 0 or list_percent + admin_percent > 100:
@@ -182,14 +239,20 @@ class CommerceService:
             if not beneficiary_id or amount <= 0:
                 continue
             existing = await self.db.scalar(select(EarningsEntry).where(
-                EarningsEntry.order_id == order.id, EarningsEntry.beneficiary_id == beneficiary_id,
+                EarningsEntry.order_id == order.id,
+                EarningsEntry.beneficiary_id == beneficiary_id,
                 EarningsEntry.entry_type == entry_type,
             ))
             if existing:
                 entries.append(existing)
                 continue
-            entry = EarningsEntry(order_id=order.id, beneficiary_id=beneficiary_id, list_id=order.list_id,
-                                  amount=amount, entry_type=entry_type)
+            entry = EarningsEntry(
+                order_id=order.id,
+                beneficiary_id=beneficiary_id,
+                list_id=order.list_id,
+                amount=amount,
+                entry_type=entry_type,
+            )
             self.db.add(entry)
             entries.append(entry)
         await self.db.flush()
@@ -199,12 +262,18 @@ class CommerceService:
         if amount < 0 or amount > order.total_price:
             raise ValueError("Invalid earning amount")
         existing = await self.db.scalar(select(EarningsEntry).where(
-            EarningsEntry.order_id == order.id, EarningsEntry.beneficiary_id == beneficiary_id,
+            EarningsEntry.order_id == order.id,
+            EarningsEntry.beneficiary_id == beneficiary_id,
             EarningsEntry.entry_type == "list_share",
         ))
         if existing:
             return existing
-        entry = EarningsEntry(order_id=order.id, beneficiary_id=beneficiary_id, list_id=order.list_id, amount=amount)
+        entry = EarningsEntry(
+            order_id=order.id,
+            beneficiary_id=beneficiary_id,
+            list_id=order.list_id,
+            amount=amount,
+        )
         self.db.add(entry)
         await self.db.flush()
         return entry
