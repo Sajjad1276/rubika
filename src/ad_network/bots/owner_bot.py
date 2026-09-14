@@ -1,6 +1,5 @@
 from fast_rub import Client
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 
 from ..core.commerce import PriceRule
 from ..core.config import Settings
@@ -53,7 +52,7 @@ async def build_owner_bot(settings: Settings) -> Client:
                     count = await db.scalar(select(func.count(Channel.id)).where(Channel.list_id == item.id, Channel.status == ChannelStatus.ACTIVE))
                     lines.append(f"{item.code} | {item.name} | {int(count or 0)} کانال")
                 await db.commit()
-                await reply(message, "🗂 لیست‌ها\n\n" + ("\n".join(lines) or "لیستی ثبت نشده است."), inline_keypad=inline_keyboard((('list:add', '➕ ساخت لیست'),), (("home", "↩️ بازگشت"),)))
+                await reply(message, "🗂 لیست‌ها\n\n" + ("\n".join(lines) or "لیستی ثبت نشده است."), inline_keypad=inline_keyboard((("list:add", "➕ ساخت لیست"),), (("home", "↩️ بازگشت"),)))
                 return
             if action == "list:add":
                 _STATES[user_id] = "list"
@@ -64,7 +63,7 @@ async def build_owner_bot(settings: Settings) -> Client:
                 rules = (await db.scalars(select(PriceRule).where(PriceRule.active.is_(True)).order_by(PriceRule.min_channels))).all()
                 lines = [f"{r.title} | لیست {r.list_id or 'عمومی'} | حداقل {r.min_channels} | هر کانال {r.price_per_channel:,} | {r.retention_hours}h" for r in rules]
                 await db.commit()
-                await reply(message, "💰 تعرفه‌های فعال\n\n" + ("\n".join(lines) or "هنوز تعرفه‌ای ثبت نشده است."), inline_keypad=inline_keyboard((('price:add', '➕ ثبت تعرفه'),), (("home", "↩️ بازگشت"),)))
+                await reply(message, "💰 تعرفه‌های فعال\n\n" + ("\n".join(lines) or "هنوز تعرفه‌ای ثبت نشده است."), inline_keypad=inline_keyboard((("price:add", "➕ ثبت تعرفه"),), (("home", "↩️ بازگشت"),)))
                 return
             if action == "price:add":
                 _STATES[user_id] = "price"
@@ -114,8 +113,7 @@ async def build_owner_bot(settings: Settings) -> Client:
                         exists = await db.scalar(select(ListNetwork).where(ListNetwork.code == code))
                         if exists:
                             raise ValueError("این کد لیست قبلاً استفاده شده است")
-                        network = ListNetwork(code=code, name=name, min_channels=min_channels, active=True)
-                        db.add(network)
+                        db.add(ListNetwork(code=code, name=name, min_channels=min_channels, active=True))
                         await db.commit()
                         _STATES.pop(user_id, None)
                         await reply(message, f"✅ لیست {code} ساخته شد.\nحداقل کانال: {min_channels}", inline_keypad=owner_keyboard())
