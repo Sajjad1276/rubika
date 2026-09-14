@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..adapters.rubika import RubikaGateway
@@ -12,14 +12,36 @@ from .models import Channel
 logger = logging.getLogger(__name__)
 
 
+def _raw(result: Any) -> Any:
+    if result is None:
+        return None
+    to_dict = getattr(result, "to_dict", None)
+    if callable(to_dict):
+        try:
+            return to_dict()
+        except Exception:
+            pass
+    original_data = getattr(result, "original_data", None)
+    return original_data if original_data is not None else result
+
+
 def _message_id(result: Any) -> str | None:
+    result = _raw(result)
     if isinstance(result, dict):
         for key in ("message_id", "id"):
             if result.get(key):
                 return str(result[key])
-        update = result.get("message_update")
-        if isinstance(update, dict) and update.get("message_id"):
-            return str(update["message_id"])
+        update_result = result.get("message_update")
+        if update_result:
+            return _message_id(update_result)
+        for key in ("messages", "message"):
+            value = result.get(key)
+            if isinstance(value, list) and value:
+                return _message_id(value[0])
+            if value:
+                return _message_id(value)
+    if isinstance(result, list) and result:
+        return _message_id(result[0])
     for key in ("message_id", "id"):
         value = getattr(result, key, None)
         if value:
@@ -48,7 +70,12 @@ class PublicationService:
         return list(result.all())
 
     async def claim(self, target: CampaignTarget) -> CampaignTarget:
-        if target.status != "planned":
+        result = await self.db.execute(
+            update(CampaignTarget)
+            .where(CampaignTarget.id == target.id, CampaignTarget.status == "planned")
+            .values(status="running")
+        )
+        if result.rowcount != 1:
             raise ValueError("Target is not claimable")
         target.status = "running"
         await self.db.flush()
@@ -71,8 +98,13 @@ class RotationPlanner:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def plan(self, campaign: Campaign, list_id: str, start_at: datetime,
-                   interval_seconds: int = 60) -> int:
+    async def plan(
+        self,
+        campaign: Campaign,
+        list_id: str,
+        start_at: datetime,
+        interval_seconds: int = 60,
+    ) -> int:
         from .campaigns import CampaignService
 
         if interval_seconds < 1:
@@ -96,12 +128,20 @@ class RotationExecutor:
         self.db = db
         self.gateway = gateway
 
-    async def execute(self, target: CampaignTarget, *, source_guid: str,
-                      source_message_id: str) -> bool:
+    async def execute(
+        self,
+        target: CampaignTarget,
+        *,
+        source_guid: str,
+        source_message_id: str,
+    ) -> bool:
         if target.status != "planned":
             return False
         service = PublicationService(self.db)
-        await service.claim(target)
+        try:
+            await service.claim(target)
+        except ValueError:
+            return False
         channel = await self.db.get(Channel, target.channel_id)
         if channel is None:
             await service.mark_failed(target)
