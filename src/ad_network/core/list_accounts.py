@@ -16,19 +16,19 @@ class AccountBinding:
 
 
 class ListAccountService:
-    """Persistent mapping between a List and its operational user-bot account."""
+    """Persistent lifecycle for operational Rubika accounts assigned to Lists."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def bind(self, *, list_id: str, rubika_user_id: str,
-                   session_ref: str | None = None) -> ListAccount:
+    async def bind(self, *, list_id: str, rubika_user_id: str, session_ref: str | None = None) -> ListAccount:
         if await self.db.get(ListNetwork, list_id) is None:
             raise ValueError("List not found")
         existing = await self.get_active(list_id)
         if existing is not None:
             existing.rubika_user_id = rubika_user_id
             existing.session_ref = session_ref
+            existing.active = True
             await self.db.flush()
             return existing
         account = ListAccount(
@@ -48,10 +48,27 @@ class ListAccountService:
             .order_by(ListAccount.id)
         )
 
+    async def list_active(self) -> list[ListAccount]:
+        return list((await self.db.scalars(
+            select(ListAccount)
+            .where(ListAccount.active.is_(True))
+            .order_by(ListAccount.list_id, ListAccount.id)
+        )).all())
+
     async def require_active(self, list_id: str) -> ListAccount:
         account = await self.get_active(list_id)
         if account is None:
             raise ValueError(f"List {list_id} has no active operational account")
+        return account
+
+    async def replace(self, account_id: str, *, rubika_user_id: str, session_ref: str | None) -> ListAccount:
+        account = await self.db.get(ListAccount, account_id)
+        if account is None:
+            raise ValueError("List account not found")
+        account.rubika_user_id = rubika_user_id
+        account.session_ref = session_ref
+        account.active = True
+        await self.db.flush()
         return account
 
     async def deactivate(self, account_id: str) -> None:
