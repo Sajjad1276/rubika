@@ -22,15 +22,21 @@ class ListAccountRuntime:
     @staticmethod
     def _resolve_session(session_ref: str) -> Path:
         path = Path(session_ref).expanduser()
-        if path.is_absolute():
+        if not path.is_absolute():
+            path = Path(get_settings().rubika_session_dir).expanduser() / path
+        if path.exists():
             return path
-        return Path(get_settings().rubika_session_dir).expanduser() / path
+        if path.suffix != ".max":
+            candidate = path.with_name(path.name + ".max")
+            if candidate.exists():
+                return candidate
+        return path
 
     async def connect(self, account: Any) -> Any:
         if not account.session_ref:
             raise RuntimeError(f"List account {account.id} has no session_ref")
         session = self._resolve_session(account.session_ref)
-        if not session.exists():
+        if not session.is_file():
             raise RuntimeError(f"List account session does not exist: {session}")
 
         existing = self.resolver.clients.get(account.id)
@@ -63,13 +69,18 @@ class ListAccountRuntime:
         if client is not None:
             close = getattr(client, "close", None)
             stop = getattr(client, "stop", None)
-            if callable(close):
-                result = close()
-                if hasattr(result, "__await__"):
-                    await result
-            elif callable(stop):
-                result = stop()
-                if hasattr(result, "__await__"):
-                    await result
-        self.resolver.unbind(account_id)
-        self._session_refs.pop(account_id, None)
+            try:
+                if callable(close):
+                    result = close()
+                    if hasattr(result, "__await__"):
+                        await result
+                elif callable(stop):
+                    result = stop()
+                    if hasattr(result, "__await__"):
+                        await result
+            finally:
+                self.resolver.unbind(account_id)
+                self._session_refs.pop(account_id, None)
+        else:
+            self.resolver.unbind(account_id)
+            self._session_refs.pop(account_id, None)
