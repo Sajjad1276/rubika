@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from enum import StrEnum
 from uuid import uuid4
@@ -224,10 +225,11 @@ class CommerceService:
             action="payment_confirmed",
             entity_type="payment",
             entity_id=payment.id,
-            metadata_json=(
-                f'{{"order_id":"{order.id}","amount":{payment.amount},'
-                f'"provider_reference":{provider_reference!r}}}'
-            ),
+            metadata_json=json.dumps({
+                "order_id": order.id,
+                "amount": payment.amount,
+                "provider_reference": provider_reference,
+            }, ensure_ascii=False),
         ))
         await self.db.flush()
         return payment
