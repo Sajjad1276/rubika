@@ -6,7 +6,6 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .campaigns import CampaignService
 from .models import Base, ListNetwork, User
 
 
@@ -139,6 +138,8 @@ class CommerceService:
         order = await self.db.get(AdOrder, payment.order_id)
         if order is None:
             raise ValueError("Order not found")
+
+        from .campaigns import CampaignService
 
         start_at = order.scheduled_at or datetime.now(timezone.utc)
         campaign_service = CampaignService(self.db)
