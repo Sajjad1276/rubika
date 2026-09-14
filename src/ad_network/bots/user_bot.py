@@ -1,14 +1,14 @@
 import re
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..core.commerce import CommerceService
 from ..core.config import Settings
 from ..core.db import SessionFactory
-from ..core.models import Channel, ListNetwork, RegistrationSource
+from ..core.models import AuditLog, Channel, ListNetwork, RegistrationSource, User
 from ..core.payments import prepare_payment
 from ..core.roles import RoleService
-from ..core.services import RegistrationService
+from ..core.services import RegistrationService, TaskService
 from .common import is_duplicate_update, quick_keyboard, reply, resolve_user, update_text
 
 CHANNEL_RE = re.compile(r"(?:https?://)?(?:rubika\.ir/)?(@?[A-Za-z0-9_]+)$")
@@ -99,6 +99,28 @@ async def _finish_ad(event, settings: Settings, user_id: str, data: dict[str, ob
         )
 
 
+async def _finish_support(event, settings: Settings, user_id: str, message: str) -> None:
+    async with SessionFactory() as db:
+        user = await RoleService(db, settings).get_or_create_user(rubika_user_id=user_id)
+        admin_username = settings.admin_username.strip().lstrip("@").lower()
+        admin = await db.scalar(select(User).where(func.lower(User.username) == admin_username))
+        if admin is not None:
+            await TaskService(db).create(
+                assignee_id=admin.id,
+                task_type="support_request",
+                payload={"user_id": user_id, "message": message.strip()},
+            )
+        db.add(AuditLog(
+            actor_id=user.id,
+            action="support_request_created",
+            entity_type="user",
+            entity_id=user.id,
+            metadata_json=f'{{"message": {message.strip()!r}}}',
+        ))
+        await db.commit()
+    await reply(event, "✅ پیام شما برای پشتیبانی ثبت شد و در صف ادمین قرار گرفت.", keypad=main_keyboard())
+
+
 async def _handle_state(event, settings: Settings, user_id: str, text: str) -> bool:
     state = _STATES.get(user_id)
     if not state:
@@ -182,7 +204,6 @@ async def _handle_state(event, settings: Settings, user_id: str, text: str) -> b
         _clear_state(user_id)
         async with SessionFactory() as db:
             channel = await db.scalar(select(Channel).where(Channel.rubika_guid == text.strip()))
-            await db.commit()
         await reply(
             event,
             f"📊 وضعیت: {channel.status.value}\nکد لیست: {channel.list_code or '-'}" if channel else "❌ کانال پیدا نشد.",
@@ -192,7 +213,7 @@ async def _handle_state(event, settings: Settings, user_id: str, text: str) -> b
 
     if name == "support":
         _clear_state(user_id)
-        await reply(event, "✅ پیام شما برای پشتیبانی ثبت شد.", keypad=main_keyboard())
+        await _finish_support(event, settings, user_id, text)
         return True
     return False
 
