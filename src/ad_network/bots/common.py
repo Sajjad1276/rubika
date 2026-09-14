@@ -14,7 +14,10 @@ def first_attr(obj: Any, *names: str, default: Any = None) -> Any:
     if obj is None:
         return default
     for name in names:
-        value = getattr(obj, name, None)
+        try:
+            value = getattr(obj, name, None)
+        except Exception:
+            value = None
         if value is not None:
             return value
     return default
@@ -24,13 +27,13 @@ def update_key(event: Any) -> str | None:
     update_id = first_attr(event, "update_id", "id", default=None)
     if update_id is not None:
         return f"update:{update_id}"
-    message_id = first_attr(event, "message_id", "message_id_string", default=None)
-    author_id = first_attr(event, "author_id", "sender_id", "author_guid", default=None)
+    message_id = first_attr(event, "message_id", "message_id_string", "msg_id", default=None)
+    author_id = first_attr(event, "author_id", "sender_id", "author_guid", "user_guid", default=None)
     if message_id is not None:
         return f"message:{author_id or '-'}:{message_id}"
     button = first_attr(event, "button_id", default=None)
     if button:
-        chat_id = first_attr(event, "chat_id", default=None)
+        chat_id = first_attr(event, "chat_id", "chat_guid", default=None)
         return f"button:{chat_id or author_id or '-'}:{button}"
     return None
 
@@ -60,12 +63,26 @@ def update_user_id(event: Any) -> str | None:
 
 
 async def resolve_user(bot: Any, event: Any) -> str | None:
-    user_id = update_user_id(event) or first_attr(event, "chat_id", default=None)
+    user_id = update_user_id(event) or first_attr(event, "chat_id", "chat_guid", default=None)
     if not user_id:
         return None
+
     username = first_attr(event, "username", "author_username", "sender_username", default=None)
+    if not username and str(user_id).startswith(("u0", "b0")):
+        get_user_info = getattr(bot, "get_user_info", None)
+        if callable(get_user_info) and str(user_id).startswith("u0"):
+            try:
+                info = await get_user_info(str(user_id))
+                data = first_attr(info, "data", default=None)
+                user = first_attr(data, "user", default=None)
+                username = first_attr(user, "username", "user_name", default=None)
+                if not username:
+                    username = first_attr(info, "username", "user_name", default=None)
+            except Exception:
+                username = None
+
     if not username:
-        chat_id = first_attr(event, "chat_id", default=user_id)
+        chat_id = first_attr(event, "chat_id", "chat_guid", default=user_id)
         try:
             info = await bot.get_chat_info(chat_id)
             data = first_attr(info, "data", default=None)
@@ -73,6 +90,7 @@ async def resolve_user(bot: Any, event: Any) -> str | None:
             username = first_attr(chat, "username", "user_name", default=None)
         except Exception:
             username = None
+
     if username:
         remember_username(str(user_id), str(username))
     return str(user_id)
@@ -83,7 +101,7 @@ def update_text(event: Any) -> str:
 
 
 def button_id(event: Any) -> str:
-    return str(first_attr(event, "button_id", default="") or "")
+    return str(first_attr(event, "button_id", "callback_button_id", default="") or "")
 
 
 def _add_back_row(rows: tuple[tuple[tuple[str, str], ...], ...]) -> tuple[tuple[tuple[str, str], ...], ...]:
