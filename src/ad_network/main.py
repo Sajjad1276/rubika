@@ -35,25 +35,32 @@ async def sync_list_accounts(runtime: ListAccountRuntime, stop: asyncio.Event) -
             pass
 
 
-async def prepare_bot(bot) -> None:
-    """Initialize FastRub with stable HTTP/1.1 polling transport.
+def configure_fastrub_http() -> None:
+    """Force FastRub's Network transport to HTTP/1.1 before Client.start().
 
-    Rubika's API can return transient 502 responses, and FastRub's HTTP/2
-    connection pool can then surface h2 state errors such as
-    RECV_WINDOW_UPDATE on an already closed connection. HTTP/1.1 is fully
-    sufficient for Bot API polling and lets FastRub recreate connections
-    cleanly after transient failures.
+    FastRub creates ``bot.network`` inside ``Client.start()``, so patching an
+    individual bot before start is too early. Patch the Network class once,
+    then every bot gets a stable HTTP/1.1 client when it is initialized.
     """
-    original_build_client_kwargs = bot.network._build_client_kwargs
+    from fast_rub.network.network import Network
 
-    def stable_client_kwargs():
-        kwargs = original_build_client_kwargs()
+    if getattr(Network, "_ad_network_http1_patch", False):
+        return
+
+    original_build_client_kwargs = Network._build_client_kwargs
+
+    def stable_client_kwargs(self):
+        kwargs = original_build_client_kwargs(self)
         kwargs["http1"] = True
         kwargs["http2"] = False
         return kwargs
 
-    bot.network._build_client_kwargs = stable_client_kwargs
+    Network._build_client_kwargs = stable_client_kwargs
+    Network._ad_network_http1_patch = True
 
+
+async def prepare_bot(bot) -> None:
+    """Start FastRub and restore polling flags reset by Client.start()."""
     await bot.start()
     bot._fetch_messages_polling = True
     bot._fetch_buttons = True
@@ -81,6 +88,8 @@ async def main() -> None:
     user_bot = await build_user_bot(settings)
     admin_bot = await build_admin_bot(settings, account_resolver, account_runtime)
     owner_bot = await build_owner_bot(settings)
+
+    configure_fastrub_http()
 
     await asyncio.gather(
         prepare_bot(user_bot),
