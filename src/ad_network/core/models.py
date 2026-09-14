@@ -3,7 +3,7 @@ from enum import StrEnum
 from uuid import uuid4
 import sys
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -13,6 +13,15 @@ class Base(DeclarativeBase):
 
 def new_id() -> str:
     return str(uuid4())
+
+
+def enum_column(enum_cls):
+    return SAEnum(
+        enum_cls,
+        native_enum=False,
+        values_callable=lambda enum: [item.value for item in enum],
+        validate_strings=True,
+    )
 
 
 class RegistrationSource(StrEnum):
@@ -109,7 +118,7 @@ class Channel(Base):
     username: Mapped[str | None] = mapped_column(String(128))
     title: Mapped[str | None] = mapped_column(String(255))
     member_count: Mapped[int | None] = mapped_column(Integer)
-    status: Mapped[ChannelStatus] = mapped_column(default=ChannelStatus.PENDING)
+    status: Mapped[ChannelStatus] = mapped_column(enum_column(ChannelStatus), default=ChannelStatus.PENDING)
     list_id: Mapped[str | None] = mapped_column(ForeignKey("lists.id"), index=True)
     list_code: Mapped[str | None] = mapped_column(String(32), index=True)
     access_verified: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -119,7 +128,6 @@ class Channel(Base):
     verification_notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     list: Mapped[ListNetwork | None] = relationship(back_populates="channels")
-
     __table_args__ = (UniqueConstraint("list_id", "list_code", name="uq_channel_list_code"),)
 
 
@@ -128,11 +136,11 @@ class RegistrationRequest(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     channel_id: Mapped[str] = mapped_column(ForeignKey("channels.id"), index=True)
     applicant_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
-    source: Mapped[RegistrationSource] = mapped_column()
+    source: Mapped[RegistrationSource] = mapped_column(enum_column(RegistrationSource))
     recruited_by_admin_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     assigned_admin_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     list_id: Mapped[str | None] = mapped_column(ForeignKey("lists.id"))
-    status: Mapped[RegistrationStatus] = mapped_column(default=RegistrationStatus.DRAFT)
+    status: Mapped[RegistrationStatus] = mapped_column(enum_column(RegistrationStatus), default=RegistrationStatus.DRAFT)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -142,7 +150,7 @@ class Task(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     assignee_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     task_type: Mapped[str] = mapped_column(String(64), index=True)
-    status: Mapped[TaskStatus] = mapped_column(default=TaskStatus.PENDING)
+    status: Mapped[TaskStatus] = mapped_column(enum_column(TaskStatus), default=TaskStatus.PENDING)
     payload: Mapped[str] = mapped_column(Text, default="{}")
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -153,7 +161,7 @@ class Operation(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     list_id: Mapped[str] = mapped_column(ForeignKey("lists.id"), index=True)
     operation_type: Mapped[str] = mapped_column(String(64), index=True)
-    status: Mapped[OperationStatus] = mapped_column(default=OperationStatus.PLANNED)
+    status: Mapped[OperationStatus] = mapped_column(enum_column(OperationStatus), default=OperationStatus.PLANNED)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -182,8 +190,6 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-# Register secondary model modules when models.py is the entry point. During a
-# circular import, the importing module will finish registering its own models.
 if "ad_network.core.campaigns" not in sys.modules:
     from .campaigns import Campaign, CampaignTarget  # noqa: E402, F401
 if "ad_network.core.commerce" not in sys.modules:
