@@ -12,6 +12,7 @@ from ..core.services import RegistrationService
 from .common import is_duplicate_update, quick_keyboard, reply, resolve_user, update_text
 
 CHANNEL_RE = re.compile(r"(?:https?://)?(?:rubika\.ir/)?(@?[A-Za-z0-9_]+)$")
+CONTENT_REF_RE = re.compile(r"^(.+):([^:]+)$")
 _STATES: dict[str, dict[str, object]] = {}
 
 
@@ -142,9 +143,12 @@ async def _handle_state(event, settings: Settings, user_id: str, text: str) -> b
     if name == "ad_title":
         data["title"] = text
         state["state"] = "ad_content"
-        await reply(event, "📎 شناسه پیام تبلیغ در کانال مرجع را ارسال کنید.")
+        await reply(event, "📎 شناسه منبع را با فرمت `شناسه‌کانال:شناسه‌پیام` ارسال کنید.\nمثال: c0ABC...:12345")
         return True
     if name == "ad_content":
+        if not CONTENT_REF_RE.fullmatch(text):
+            await reply(event, "❌ فرمت منبع نامعتبر است. نمونه: c0ABC...:12345")
+            return True
         data["content_ref"] = text
         state["state"] = "ad_count"
         await reply(event, "🔢 تعداد کانال هدف را وارد کنید.")
@@ -177,7 +181,7 @@ async def _handle_state(event, settings: Settings, user_id: str, text: str) -> b
     if name == "status":
         _clear_state(user_id)
         async with SessionFactory() as db:
-            channel = await db.scalar(select(Channel).where(Channel.rubika_guid == text.lstrip("@")))
+            channel = await db.scalar(select(Channel).where(Channel.rubika_guid == text.strip()))
             await db.commit()
         await reply(
             event,
@@ -188,7 +192,7 @@ async def _handle_state(event, settings: Settings, user_id: str, text: str) -> b
 
     if name == "support":
         _clear_state(user_id)
-        await reply(event, "✅ درخواست پشتیبانی ثبت شد.", keypad=main_keyboard())
+        await reply(event, "✅ پیام شما برای پشتیبانی ثبت شد.", keypad=main_keyboard())
         return True
     return False
 
@@ -227,7 +231,7 @@ async def build_user_bot(settings: Settings):
             await reply(event, "🔗 لینک یا شناسه عمومی کانال را ارسال کنید.\nمثال: @mychannel")
         elif text == "📊 وضعیت کانال":
             _start_state(user_id, "status")
-            await reply(event, "📊 شناسه یا لینک کانال خود را ارسال کنید.")
+            await reply(event, "📊 شناسه عمومی کانال را ارسال کنید.\nمثال: @mychannel")
         elif text == "📢 درخواست تبلیغ":
             _start_state(user_id, "ad_list")
             await reply(event, "📚 کد لیست تبلیغ را وارد کنید.\nمثال: #001 یا 001")
