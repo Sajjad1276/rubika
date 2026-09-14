@@ -61,8 +61,8 @@ async def build_owner_bot(settings: Settings):
                 supervisors = 0
                 for item in (await db.scalars(select(User))).all():
                     role_set = set(_role_values(item))
-                    admins += UserRole.ADMIN.value in role_set
-                    supervisors += UserRole.SUPERVISOR.value in role_set
+                    admins += int(UserRole.ADMIN.value in role_set)
+                    supervisors += int(UserRole.SUPERVISOR.value in role_set)
                 await db.commit()
                 await reply(
                     event,
@@ -167,7 +167,6 @@ async def build_owner_bot(settings: Settings):
                     keypad=owner_keyboard(),
                 )
                 return
-
             await db.commit()
 
     @bot.on_callback()
@@ -253,7 +252,9 @@ async def build_owner_bot(settings: Settings):
                             raise ValueError("نام کاربری خالی است")
                         info = await bot.get_user_info(username)
                         data = getattr(info, "to_dict", lambda: info)()
-                        user_data = data.get("user", {}) if isinstance(data, dict) else {}
+                        if not isinstance(data, dict):
+                            raise ValueError("پاسخ اطلاعات کاربر نامعتبر است")
+                        user_data = data.get("data", {}).get("user") or data.get("user") or {}
                         rubika_id = user_data.get("user_guid") or user_data.get("guid")
                         if not rubika_id:
                             raise ValueError("کاربر روبیکا پیدا نشد")
