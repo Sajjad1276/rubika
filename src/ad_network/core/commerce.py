@@ -6,6 +6,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
+from .campaigns import CampaignService
 from .models import Base, ListNetwork, User
 
 
@@ -83,7 +84,7 @@ class EarningsEntry(Base):
 
 
 class CommerceService:
-    """Server-side pricing, payment confirmation and settlement primitives."""
+    """Server-side pricing, payment confirmation and campaign activation."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -120,12 +121,14 @@ class CommerceService:
         existing = await self.db.scalar(select(Payment).where(Payment.order_id == order_id))
         if existing:
             return existing
-        payment = Payment(order_id=order.id, amount=order.total_price, idempotency_key=idempotency_key or f"payment:{order_id}")
+        payment = Payment(order_id=order.id, amount=order.total_price,
+                          idempotency_key=idempotency_key or f"payment:{order_id}")
         self.db.add(payment)
         await self.db.flush()
         return payment
 
-    async def confirm_payment(self, payment_id: str, *, confirmer_id: str, provider_reference: str | None = None) -> Payment:
+    async def confirm_payment(self, payment_id: str, *, confirmer_id: str,
+                              provider_reference: str | None = None) -> Payment:
         payment = await self.db.get(Payment, payment_id)
         if payment is None:
             raise ValueError("Payment not found")
@@ -136,12 +139,31 @@ class CommerceService:
         order = await self.db.get(AdOrder, payment.order_id)
         if order is None:
             raise ValueError("Order not found")
+
+        start_at = order.scheduled_at or datetime.now(timezone.utc)
+        campaign_service = CampaignService(self.db)
+        campaign = await campaign_service.create_campaign(
+            order_id=order.id,
+            title=order.title,
+            content_ref=order.content_ref,
+            advertiser_id=order.advertiser_id,
+            retention_hours=order.retention_hours,
+        )
+        await campaign_service.target_list(
+            campaign,
+            order.list_id,
+            channel_count=order.channel_count,
+            start_at=start_at,
+            interval_seconds=60,
+        )
+
         payment.status = PaymentStatus.CONFIRMED
         payment.confirmed_by = confirmer_id
         payment.confirmed_at = datetime.now(timezone.utc)
         if provider_reference:
             payment.provider_reference = provider_reference
-        order.status = OrderStatus.PAID
+        campaign.status = "scheduled" if start_at > datetime.now(timezone.utc) else "active"
+        order.status = OrderStatus.SCHEDULED if campaign.status == "scheduled" else OrderStatus.RUNNING
         await self.db.flush()
         return payment
 
@@ -163,10 +185,12 @@ class CommerceService:
                 EarningsEntry.entry_type == entry_type,
             ))
             if existing:
-                entries.append(existing); continue
+                entries.append(existing)
+                continue
             entry = EarningsEntry(order_id=order.id, beneficiary_id=beneficiary_id, list_id=order.list_id,
                                   amount=amount, entry_type=entry_type)
-            self.db.add(entry); entries.append(entry)
+            self.db.add(entry)
+            entries.append(entry)
         await self.db.flush()
         return entries
 
