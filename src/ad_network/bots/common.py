@@ -7,13 +7,56 @@ from fast_rub.button import KeyPad
 
 from ..core.roles import remember_username
 
+_SEEN_UPDATES: dict[str, float] = {}
+_DEDUP_WINDOW_SECONDS = 30.0
+
 
 def first_attr(obj: Any, *names: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
     for name in names:
         value = getattr(obj, name, None)
         if value is not None:
             return value
     return default
+
+
+def update_key(msg: Any) -> str | None:
+    """Return a stable FastRub update key when the event exposes one."""
+    event = first_attr(msg, "new_message", default=msg)
+    update_id = first_attr(msg, "update_id", "id", default=None)
+    if update_id is not None:
+        return f"update:{update_id}"
+    message_id = first_attr(msg, "message_id", default=None)
+    if message_id is None:
+        message_id = first_attr(event, "message_id", "message_id", default=None)
+    sender_id = first_attr(msg, "sender_id", default=None) or first_attr(
+        event, "author_object_guid", "author_guid", "user_guid", default=None
+    )
+    if message_id is not None:
+        return f"message:{sender_id or '-'}:{message_id}"
+    button = first_attr(msg, "button_id", default=None)
+    if button:
+        chat_id = first_attr(msg, "chat_id", default=None)
+        return f"button:{chat_id or sender_id or '-'}:{button}:{message_id or '-'}"
+    return None
+
+
+def is_duplicate_update(msg: Any) -> bool:
+    """Suppress the same FastRub event when polling delivers it more than once."""
+    import time
+
+    key = update_key(msg)
+    if key is None:
+        return False
+    now = time.monotonic()
+    stale = [item for item, seen_at in _SEEN_UPDATES.items() if now - seen_at > _DEDUP_WINDOW_SECONDS]
+    for item in stale:
+        _SEEN_UPDATES.pop(item, None)
+    if key in _SEEN_UPDATES:
+        return True
+    _SEEN_UPDATES[key] = now
+    return False
 
 
 def update_user_id(msg: Any) -> str | None:
@@ -61,7 +104,6 @@ def inline_keyboard(*rows: tuple[tuple[str, str], ...]):
 
 
 def quick_keyboard(*rows: tuple[tuple[str, str], ...]):
-    """Build a normal Rubika reply/chat keyboard (not inline)."""
     return _build_keyboard(rows, callback=False)
 
 
