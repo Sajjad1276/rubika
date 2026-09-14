@@ -83,7 +83,7 @@ class ListAccountResolver:
     """Runtime registry of authenticated FastRub pyrubi clients."""
 
     def __init__(self, clients: dict[str, Any] | None = None):
-        self.clients = clients or {}
+        self.clients = clients if clients is not None else {}
 
     def resolve(self, account: ListAccount) -> Any:
         try:
