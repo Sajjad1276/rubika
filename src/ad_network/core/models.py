@@ -179,3 +179,10 @@ class AuditLog(Base):
     entity_id: Mapped[str] = mapped_column(String(36), index=True)
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# Import secondary model modules after the base models are fully declared so
+# Base.metadata always contains every ORM table, even when callers import Base
+# directly (for example test fixtures and migration tooling).
+from .campaigns import Campaign, CampaignTarget  # noqa: E402, F401
+from .commerce import AdOrder, EarningsEntry, Payment, PriceRule  # noqa: E402, F401
