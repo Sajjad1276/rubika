@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from ..adapters.list_account import ListAccountGatewayResolver
 from ..core.account_runtime import ListAccountRuntime
 from ..core.campaigns import Campaign, CampaignTarget
-from ..core.commerce import AdOrder, CommerceService, Payment, PaymentStatus
+from ..core.commerce import AdOrder, CommerceService, EarningsEntry, Payment, PaymentStatus
 from ..core.config import Settings
 from ..core.db import SessionFactory
 from ..core.list_accounts import ListAccountResolver, ListAccountService
@@ -24,7 +24,11 @@ def admin_keyboard():
     )
 
 
-async def build_admin_bot(settings: Settings, account_resolver: ListAccountResolver | None = None, account_runtime: ListAccountRuntime | None = None):
+async def build_admin_bot(
+    settings: Settings,
+    account_resolver: ListAccountResolver | None = None,
+    account_runtime: ListAccountRuntime | None = None,
+):
     from maxrubika import Bot
 
     bot = Bot(settings.admin_bot_token, timeout=30, max_retries=5)
@@ -35,7 +39,6 @@ async def build_admin_bot(settings: Settings, account_resolver: ListAccountResol
             requests = list((await db.scalars(select(RegistrationRequest).where(
                 RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION
             ).order_by(RegistrationRequest.created_at).limit(20))).all())
-            await db.commit()
         if not requests:
             await reply(event, "📭 درخواست معلقی وجود ندارد.", keypad=admin_keyboard())
             return
@@ -45,8 +48,10 @@ async def build_admin_bot(settings: Settings, account_resolver: ListAccountResol
 
     async def show_payments(event):
         async with SessionFactory() as db:
-            payments = list((await db.scalars(select(Payment).where(Payment.status == PaymentStatus.PENDING).order_by(Payment.created_at).limit(20))).all())
-            await db.commit()
+            payments = list((await db.scalars(
+                select(Payment).where(Payment.status == PaymentStatus.PENDING)
+                .order_by(Payment.created_at).limit(20)
+            )).all())
         if not payments:
             await reply(event, "📭 پرداخت معلقی وجود ندارد.", keypad=admin_keyboard())
             return
@@ -60,8 +65,11 @@ async def build_admin_bot(settings: Settings, account_resolver: ListAccountResol
             active = await db.scalar(select(func.count(Channel.id)).where(Channel.status == "active"))
             pending = await db.scalar(select(func.count(Channel.id)).where(Channel.status == "pending"))
             removed = await db.scalar(select(func.count(Channel.id)).where(Channel.status == "removed"))
-            await db.commit()
-        await reply(event, f"📺 وضعیت شبکه کانال‌ها\n\nکل: {int(total or 0)}\nفعال: {int(active or 0)}\nدر انتظار: {int(pending or 0)}\nحذف‌شده: {int(removed or 0)}", keypad=admin_keyboard())
+        await reply(
+            event,
+            f"📺 وضعیت شبکه کانال‌ها\n\nکل: {int(total or 0)}\nفعال: {int(active or 0)}\nدر انتظار: {int(pending or 0)}\nحذف‌شده: {int(removed or 0)}",
+            keypad=admin_keyboard(),
+        )
 
     async def show_campaigns(event):
         async with SessionFactory() as db:
@@ -69,27 +77,43 @@ async def build_admin_bot(settings: Settings, account_resolver: ListAccountResol
             lines = []
             for campaign in campaigns:
                 total = await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id == campaign.id))
-                published = await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id == campaign.id, CampaignTarget.status == "published"))
-                retained = await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id == campaign.id, CampaignTarget.status == "retained"))
-                lines.append(f"{campaign.id[:8]} | {campaign.status} | {int(published or 0)}/{int(total or 0)} منتشر | {int(retained or 0)} ماندگار")
-            await db.commit()
+                published = await db.scalar(select(func.count(CampaignTarget.id)).where(
+                    CampaignTarget.campaign_id == campaign.id,
+                    CampaignTarget.status == "published",
+                ))
+                retained = await db.scalar(select(func.count(CampaignTarget.id)).where(
+                    CampaignTarget.campaign_id == campaign.id,
+                    CampaignTarget.status == "retained",
+                ))
+                lines.append(
+                    f"{campaign.id[:8]} | {campaign.status} | {int(published or 0)}/{int(total or 0)} منتشر | {int(retained or 0)} ماندگار"
+                )
         await reply(event, "📣 وضعیت کمپین‌ها\n\n" + ("\n".join(lines) or "کمپینی وجود ندارد."), keypad=admin_keyboard())
 
     async def show_violations(event):
         async with SessionFactory() as db:
             rows = list((await db.scalars(select(Violation).order_by(Violation.created_at.desc()).limit(20))).all())
-            lines = [f"{row.channel_id[:8]} | {row.violation_type} | شدت {row.severity} | {'حل‌شده' if row.resolved else 'باز'}" for row in rows]
-            await db.commit()
+            lines = [
+                f"{row.channel_id[:8]} | {row.violation_type} | شدت {row.severity} | {'حل‌شده' if row.resolved else 'باز'}"
+                for row in rows
+            ]
         await reply(event, "⚠️ تخلفات اخیر\n\n" + ("\n".join(lines) or "تخلفی ثبت نشده است."), keypad=admin_keyboard())
 
     async def show_performance(event):
         async with SessionFactory() as db:
             orders = await db.scalar(select(func.count(AdOrder.id)))
-            paid = await db.scalar(select(func.count(AdOrder.id)).where(AdOrder.status.in_(["paid", "scheduled", "running", "completed"])))
-            revenue = await db.scalar(select(func.coalesce(func.sum(AdOrder.total_price), 0)).where(AdOrder.status.in_(["paid", "scheduled", "running", "completed"])))
-            earnings = await db.scalar(select(func.coalesce(func.sum(__import__("ad_network.core.commerce", fromlist=["EarningsEntry"]).EarningsEntry.amount), 0)))
-            await db.commit()
-        await reply(event, f"📈 عملکرد\n\nسفارش‌ها: {int(orders or 0)}\nپرداخت‌شده/فعال: {int(paid or 0)}\nگردش ثبت‌شده: {int(revenue or 0):,}\nدرآمد ثبت‌شده: {int(earnings or 0):,}", keypad=admin_keyboard())
+            paid = await db.scalar(select(func.count(AdOrder.id)).where(
+                AdOrder.status.in_(["paid", "scheduled", "running", "completed"])
+            ))
+            revenue = await db.scalar(select(func.coalesce(func.sum(AdOrder.total_price), 0)).where(
+                AdOrder.status.in_(["paid", "scheduled", "running", "completed"])
+            ))
+            earnings = await db.scalar(select(func.coalesce(func.sum(EarningsEntry.amount), 0)))
+        await reply(
+            event,
+            f"📈 عملکرد\n\nسفارش‌ها: {int(orders or 0)}\nپرداخت‌شده/فعال: {int(paid or 0)}\nگردش ثبت‌شده: {int(revenue or 0):,}\nدرآمد ثبت‌شده: {int(earnings or 0):,}",
+            keypad=admin_keyboard(),
+        )
 
     async def handle_action(event, action: str):
         user_id = await resolve_user(bot, event)
@@ -99,9 +123,13 @@ async def build_admin_bot(settings: Settings, account_resolver: ListAccountResol
             roles = RoleService(db, settings)
             user = await roles.get_or_create_user(rubika_user_id=user_id)
             if not roles.has(user, UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.OWNER):
-                await db.commit(); await reply(event, "⛔ دسترسی ندارید."); return
+                await db.rollback()
+                await reply(event, "⛔ دسترسی ندارید.")
+                return
             if action in {"home", "back"}:
-                await db.commit(); await reply(event, "🛠 داشبورد ادمین", keypad=admin_keyboard()); return
+                await db.commit()
+                await reply(event, "🛠 داشبورد ادمین", keypad=admin_keyboard())
+                return
             if action == "accounts" or action.startswith("account:"):
                 await db.commit()
                 if account_runtime is None:
@@ -109,49 +137,87 @@ async def build_admin_bot(settings: Settings, account_resolver: ListAccountResol
                 else:
                     await account_button(event, action, account_runtime, bot)
                 return
-            if action == "requests": await db.commit(); await show_requests(event); return
-            if action == "payments": await db.commit(); await show_payments(event); return
-            if action == "channels": await db.commit(); await show_channels(event); return
-            if action == "campaigns": await db.commit(); await show_campaigns(event); return
-            if action == "violations": await db.commit(); await show_violations(event); return
-            if action == "performance": await db.commit(); await show_performance(event); return
+            if action == "requests":
+                await db.commit(); await show_requests(event); return
+            if action == "payments":
+                await db.commit(); await show_payments(event); return
+            if action == "channels":
+                await db.commit(); await show_channels(event); return
+            if action == "campaigns":
+                await db.commit(); await show_campaigns(event); return
+            if action == "violations":
+                await db.commit(); await show_violations(event); return
+            if action == "performance":
+                await db.commit(); await show_performance(event); return
             if action.startswith("payment:"):
                 payment = await db.get(Payment, action.split(":", 1)[1])
                 order = await db.get(AdOrder, payment.order_id) if payment else None
                 if not payment or not order:
                     await db.commit(); await reply(event, "❌ پرداخت پیدا نشد."); return
                 await db.commit()
-                await reply(event, f"💳 پرداخت {payment.provider_reference or '-'}\nمبلغ: {payment.amount:,}\nسفارش: {order.id[:8]}", inline_keypad=inline_keyboard(((f"confirm_payment:{payment.id}", "✅ تأیید پرداخت"),), (("payments", "↩️ بازگشت"),)))
+                await reply(
+                    event,
+                    f"💳 پرداخت {payment.provider_reference or '-'}\nمبلغ: {payment.amount:,}\nسفارش: {order.id[:8]}",
+                    inline_keypad=inline_keyboard(
+                        ((f"confirm_payment:{payment.id}", "✅ تأیید پرداخت"),),
+                        (("payments", "↩️ بازگشت"),),
+                    ),
+                )
                 return
             if action.startswith("confirm_payment:"):
                 try:
-                    payment = await CommerceService(db).confirm_payment(action.split(":", 1)[1], confirmer_id=user.id)
-                    await db.commit(); await reply(event, f"✅ پرداخت تأیید و کمپین زمان‌بندی شد. سفارش {payment.order_id[:8]}", keypad=admin_keyboard())
+                    payment = await CommerceService(db).confirm_payment(
+                        action.split(":", 1)[1],
+                        confirmer_id=user.id,
+                    )
+                    await db.commit()
+                    await reply(event, f"✅ پرداخت تأیید و کمپین زمان‌بندی شد. سفارش {payment.order_id[:8]}", keypad=admin_keyboard())
                 except ValueError as exc:
                     await db.rollback(); await reply(event, f"⛔ تأیید انجام نشد: {exc}")
                 return
             if action.startswith("req:"):
-                request = await db.scalar(select(RegistrationRequest).where(RegistrationRequest.id == action.split(":", 1)[1]))
+                request = await db.scalar(select(RegistrationRequest).where(
+                    RegistrationRequest.id == action.split(":", 1)[1]
+                ))
                 channel = await db.get(Channel, request.channel_id) if request else None
                 if not request:
                     await db.commit(); await reply(event, "❌ درخواست پیدا نشد."); return
                 await db.commit()
-                await reply(event, f"🔎 درخواست {request.id[:8]}\nکانال: {channel.rubika_guid if channel else '-'}\nلیست: {request.list_id}\n\nدسترسی را بررسی کنید.", inline_keypad=inline_keyboard(((f"access:{request.id}", "🔐 احراز دسترسی"),), ((f"approve:{request.id}", "✅ تأیید"), (f"reject:{request.id}", "🚫 رد"))))
+                await reply(
+                    event,
+                    f"🔎 درخواست {request.id[:8]}\nکانال: {channel.rubika_guid if channel else '-'}\nلیست: {request.list_id}\n\nدسترسی را بررسی کنید.",
+                    inline_keypad=inline_keyboard(
+                        ((f"access:{request.id}", "🔐 احراز دسترسی"),),
+                        ((f"approve:{request.id}", "✅ تأیید"), (f"reject:{request.id}", "🚫 رد")),
+                    ),
+                )
                 return
             if action.startswith("access:"):
-                request = await db.scalar(select(RegistrationRequest).where(RegistrationRequest.id == action.split(":", 1)[1], RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION))
+                request = await db.scalar(select(RegistrationRequest).where(
+                    RegistrationRequest.id == action.split(":", 1)[1],
+                    RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION,
+                ))
                 if not request or gateway_resolver is None:
                     await db.commit(); await reply(event, "⛔ درخواست یا gateway در دسترس نیست."); return
                 try:
                     account = await ListAccountService(db).require_active(request.list_id)
                     gateway = gateway_resolver.resolve(account)
-                    await VerificationService(db).verify_from_rubika(channel_id=request.channel_id, gateway=gateway, operational_account_user_id=account.rubika_user_id, verifier_id=user.id)
-                    await db.commit(); await reply(event, "✅ دسترسی واقعی کانال بررسی شد.", inline_keypad=inline_keyboard(((f"approve:{request.id}", "✅ فعال‌سازی"),)))
+                    await VerificationService(db).verify_from_rubika(
+                        channel_id=request.channel_id,
+                        gateway=gateway,
+                        operational_account_user_id=account.rubika_user_id,
+                        verifier_id=user.id,
+                    )
+                    await db.commit()
+                    await reply(event, "✅ دسترسی واقعی کانال بررسی شد.", inline_keypad=inline_keyboard(((f"approve:{request.id}", "✅ فعال‌سازی"),)))
                 except (ValueError, RuntimeError) as exc:
                     await db.rollback(); await reply(event, f"⛔ احراز انجام نشد: {exc}")
                 return
             if action.startswith("approve:"):
-                request = await db.scalar(select(RegistrationRequest).where(RegistrationRequest.id == action.split(":", 1)[1], RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION))
+                request = await db.scalar(select(RegistrationRequest).where(
+                    RegistrationRequest.id == action.split(":", 1)[1],
+                    RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION,
+                ))
                 if not request:
                     await db.commit(); await reply(event, "❌ درخواست پیدا نشد."); return
                 try:
@@ -161,13 +227,20 @@ async def build_admin_bot(settings: Settings, account_resolver: ListAccountResol
                     await db.rollback(); await reply(event, f"⛔ فعال‌سازی انجام نشد: {exc}")
                 return
             if action.startswith("reject:"):
-                request = await db.scalar(select(RegistrationRequest).where(RegistrationRequest.id == action.split(":", 1)[1], RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION))
+                request = await db.scalar(select(RegistrationRequest).where(
+                    RegistrationRequest.id == action.split(":", 1)[1],
+                    RegistrationRequest.status == RegistrationStatus.PENDING_VERIFICATION,
+                ))
                 if request:
                     await RegistrationService(db).verify(request, approved=False, verifier_id=user.id)
                     await db.commit(); await reply(event, "🚫 درخواست رد شد.", keypad=admin_keyboard())
                 return
             await db.commit()
-            responses = {"tasks": "📋 وظایف امروز در صف هستند.", "recruit": "🎯 سرنخ‌های جذب کانال در حال جمع‌آوری است.", "training": "🎓 آموزش مرحله‌ای شبکه فعال است."}
+            responses = {
+                "tasks": "📋 وظایف امروز در صف هستند.",
+                "recruit": "🎯 سرنخ‌های جذب کانال در حال جمع‌آوری است.",
+                "training": "🎓 آموزش مرحله‌ای شبکه فعال است.",
+            }
             if action in responses:
                 await reply(event, responses[action], keypad=admin_keyboard())
 
@@ -203,7 +276,6 @@ async def build_admin_bot(settings: Settings, account_resolver: ListAccountResol
         async with SessionFactory() as db:
             user = await RoleService(db, settings).get_or_create_user(rubika_user_id=user_id)
             allowed = RoleService(db, settings).has(user, UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.OWNER)
-            await db.commit()
         if not allowed:
             await reply(event, "⛔ دسترسی این ربات فقط برای ادمین‌ها و ناظران شبکه است.")
 
