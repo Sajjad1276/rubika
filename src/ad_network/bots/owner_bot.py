@@ -91,6 +91,11 @@ async def build_owner_bot(settings: Settings) -> Client:
         if not user_id:
             return
         text = update_text(message)
+        # /start is intentionally public so the bot always answers and shows
+        # its menu. Every actual action remains protected by role checks.
+        if text in {"/start", "منو", "menu"}:
+            await reply(message, "👑 مدیریت شبکه", inline_keypad=owner_keyboard())
+            return
         if user_id in _STATES:
             async with SessionFactory() as db:
                 roles = RoleService(db, settings)
@@ -146,9 +151,7 @@ async def build_owner_bot(settings: Settings) -> Client:
         if not allowed:
             await reply(message, "⛔ دسترسی این ربات فقط برای مالک و ناظر شبکه است.")
             return
-        if text in {"/start", "منو", "menu"}:
-            await reply(message, "👑 مدیریت شبکه", inline_keypad=owner_keyboard())
-        elif text == "3":
+        if text == "3":
             await handle_action(message, "lists")
 
     return bot
