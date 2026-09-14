@@ -77,8 +77,9 @@ def _nested_mapping(data: Any, *names: str) -> dict[str, Any]:
     current = _mapping(data)
     for name in names:
         candidate = current.get(name)
-        if candidate is not None:
-            current = _mapping(candidate)
+        if candidate is None:
+            return {}
+        current = _mapping(candidate)
     return current
 
 
@@ -135,14 +136,7 @@ class MaxRubikaGateway:
                 break
 
         if target is None:
-            return AccessSnapshot(
-                user_id=user_id,
-                is_admin=False,
-                can_send=False,
-                can_edit=False,
-                can_delete=False,
-                raw=raw,
-            )
+            return AccessSnapshot(user_id=user_id, is_admin=False, can_send=False, can_edit=False, can_delete=False, raw=raw)
 
         permissions = target.get("permissions") or target.get("access_list") or []
         access = None
@@ -156,13 +150,14 @@ class MaxRubikaGateway:
 
         if isinstance(permissions, dict):
             permissions = [key for key, value in permissions.items() if value]
-        permissions = {str(permission).lower() for permission in permissions}
+        permissions = {str(permission).replace("_", "").replace(" ", "").lower() for permission in permissions}
 
-        # MAXRubika/Rubika deployments have used several names for the same
-        # channel capabilities. Keep the mapping explicit and fail closed.
-        can_send = bool({"send", "write", "post", "change_info"} & permissions)
-        can_edit = bool({"edit", "edit_message", "post_edit_delete_message"} & permissions)
-        can_delete = bool({"delete", "delete_message", "post_edit_delete_message"} & permissions)
+        send_names = {"send", "write", "post", "sendmessages", "sendmessage"}
+        edit_names = {"edit", "editmessage", "editmessages", "posteditdeletemessage"}
+        delete_names = {"delete", "deletemessage", "deletemessages", "posteditdeletemessage"}
+        can_send = bool(send_names & permissions)
+        can_edit = bool(edit_names & permissions)
+        can_delete = bool(delete_names & permissions)
         join_type = str(target.get("join_type", "")).lower()
         is_admin = join_type in {"admin", "creator"} or bool(target)
 
@@ -188,5 +183,5 @@ class MaxRubikaGateway:
         return await self.client.get_messages_by_id(object_guid, [message_id])
 
 
-# Compatibility alias for internal imports from earlier FastRubika versions.
+# Compatibility alias for internal imports from earlier versions.
 FastRubikaGateway = MaxRubikaGateway
