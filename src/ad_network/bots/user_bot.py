@@ -1,3 +1,4 @@
+import json
 import re
 
 from sqlalchemy import func, select
@@ -115,7 +116,7 @@ async def _finish_support(event, settings: Settings, user_id: str, message: str)
             action="support_request_created",
             entity_type="user",
             entity_id=user.id,
-            metadata_json=f'{{"message": {message.strip()!r}}}',
+            metadata_json=json.dumps({"message": message.strip()}, ensure_ascii=False),
         ))
         await db.commit()
     await reply(event, "✅ پیام شما برای پشتیبانی ثبت شد و در صف ادمین قرار گرفت.", keypad=main_keyboard())
