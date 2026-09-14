@@ -21,6 +21,21 @@ Railway is the production deployment target.
 - SQLite is supported for local development.
 - `railway.toml` starts the single process containing all three bots.
 - Production secrets are supplied through Railway environment variables.
+- Operational Rubika user-bot sessions must live on persistent storage. Mount a Railway Volume at `/data` and set `RUBIKA_SESSION_DIR=/data/sessions`.
+
+## Dynamic List accounts
+
+List operational accounts are **not static configuration**. They are database records and can change while the network is running.
+
+- A List can receive a new operational account.
+- An active account can be deactivated.
+- A removed account is disconnected automatically.
+- A newly activated account is connected automatically.
+- If the session assigned to an active account changes, the old live client is closed and the new session is connected.
+- The reconciliation loop runs every `LIST_ACCOUNT_SYNC_SECONDS` seconds, defaulting to 30.
+- Publication only uses accounts that are both active in the database and currently connected.
+
+This means adding or removing List accounts does not require restarting the Railway service.
 
 ## Implemented layers
 
@@ -34,12 +49,14 @@ Railway is the production deployment target.
 - Campaign and campaign-target models
 - Per-list pricing rules
 - Advertising order and quote workflow
+- Payment abstraction and settlement primitives
 - Earnings ledger primitives
 - Deterministic one-minute rotation planner
 - Idempotent publication target states
 - Retention-window monitoring
 - Three-strike early-deletion enforcement
 - Tasks, violations and audit history
+- Dynamic operational List-account lifecycle
 - Railway deployment configuration
 
 ## Run locally
@@ -65,15 +82,18 @@ USER_BOT_TOKEN=<user bot token>
 ADMIN_BOT_TOKEN=<admin bot token>
 OWNER_BOT_TOKEN=<owner bot token>
 OWNER_ID=<Rubika owner user id>
+RUBIKA_SESSION_DIR=/data/sessions
+LIST_ACCOUNT_SYNC_SECONDS=30
 ```
 
 Never commit real Rubika tokens or production credentials.
 
-## Next implementation layers
+## Railway session storage
 
-1. Real Rubika permission/member-count verification through the gateway
-2. Per-list account/session management and safe publication worker
-3. Admin recruitment CRM and KPI tracking
-4. Payment provider abstraction and settlement workflow
-5. Owner/supervisor analytics and configurable bot modules
-6. Integration tests against mocked FastRub responses
+Create a persistent Railway Volume and mount it at `/data`. Store each operational account's FastRub/Pyrubi session under `/data/sessions` and save that path in the List account's `session_ref`.
+
+Do not store session files in the Git repository or rely on the container's ephemeral filesystem.
+
+## Database migrations
+
+The application initializes missing tables on startup for a fresh database. Alembic migrations are also included for schema evolution. For a production database that already contains data, run the appropriate Alembic migrations before deploying code that requires a newer schema.
