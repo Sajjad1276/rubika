@@ -55,43 +55,55 @@ def _first_value(data: Any, *keys: str) -> Any:
 
 
 class MaxRubikaGateway:
-    """Adapter around MAXRubika Messenger for operational List accounts."""
+    """Gateway backed by MAXRubika Messenger."""
 
     def __init__(self, client: Any):
         self.client = client
 
     async def get_channel(self, guid: str) -> ChannelSnapshot:
-        data = _raw(await self.client.get_chat_info(guid))
-        chat = data.get("channel", data) if isinstance(data, dict) else {}
+        getter = getattr(self.client, "get_chat_info", None) or getattr(self.client, "get_channel_info")
+        data = _raw(await getter(guid))
+        chat = data.get("channel", data) if isinstance(data, dict) else getattr(data, "channel", data)
+        raw_chat = _raw(chat)
+        if not isinstance(raw_chat, dict):
+            raw_chat = getattr(chat, "__dict__", {})
         return ChannelSnapshot(
             guid=guid,
-            title=_first_value(chat, "title", "name", "channel_title"),
-            username=_first_value(chat, "username", "user_name"),
-            member_count=_first_int(chat, "members_count", "member_count", "participants_count"),
+            title=_first_value(raw_chat, "title", "name", "channel_title") or getattr(chat, "title", None),
+            username=_first_value(raw_chat, "username", "user_name") or getattr(chat, "username", None),
+            member_count=_first_int(raw_chat, "members_count", "member_count", "participants_count"),
         )
 
     async def verify_channel_access(self, guid: str, user_id: str) -> AccessSnapshot:
-        admin_response = await self.client.get_admin_members(guid)
-        raw = _raw(admin_response)
+        getter = getattr(self.client, "get_admin_members", None) or getattr(self.client, "get_channel_admin_members")
+        raw = _raw(await getter(guid))
         members = []
         if isinstance(raw, dict):
             members = raw.get("in_chat_members") or raw.get("members") or raw.get("admins") or []
         elif isinstance(raw, list):
             members = raw
+
         for member in members:
             item = _raw(member)
             if not isinstance(item, dict):
-                continue
+                item = getattr(member, "__dict__", {})
             candidate = str(_first_value(item, "member_guid", "user_guid", "user_id", "guid", "id") or "")
             if candidate != str(user_id):
                 continue
-            access = _raw(await self.client.get_admin_access_list(guid, user_id))
-            permissions = []
-            if isinstance(access, dict):
-                permissions = access.get("access_list") or access.get("permissions") or []
+            permissions = item.get("permissions") or []
+            if not permissions:
+                access_getter = getattr(self.client, "get_admin_access_list", None)
+                if access_getter is not None:
+                    access = _raw(await access_getter(guid, user_id))
+                    if isinstance(access, dict):
+                        permissions = access.get("access_list") or access.get("permissions") or []
+                else:
+                    access = None
+            else:
+                access = None
             if isinstance(permissions, dict):
-                permissions = [k for k, v in permissions.items() if v]
-            permissions = {str(p) for p in permissions}
+                permissions = [key for key, value in permissions.items() if value]
+            permissions = {str(permission) for permission in permissions}
             return AccessSnapshot(
                 user_id=user_id,
                 is_admin=True,
