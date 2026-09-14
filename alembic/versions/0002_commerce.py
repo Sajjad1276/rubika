@@ -16,6 +16,7 @@ def upgrade() -> None:
     op.create_table(
         "campaigns",
         sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("order_id", sa.String(36), sa.ForeignKey("ad_orders.id"), unique=True),
         sa.Column("title", sa.String(255), nullable=False),
         sa.Column("advertiser_id", sa.String(36), sa.ForeignKey("users.id")),
         sa.Column("content_ref", sa.Text(), nullable=False),
@@ -23,22 +24,8 @@ def upgrade() -> None:
         sa.Column("status", sa.String(32), nullable=False, server_default="draft"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
+    op.create_index("ix_campaigns_order_id", "campaigns", ["order_id"])
     op.create_index("ix_campaigns_status", "campaigns", ["status"])
-
-    op.create_table(
-        "campaign_targets",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("campaign_id", sa.String(36), sa.ForeignKey("campaigns.id"), nullable=False),
-        sa.Column("list_id", sa.String(36), sa.ForeignKey("lists.id"), nullable=False),
-        sa.Column("channel_id", sa.String(36), sa.ForeignKey("channels.id"), nullable=False),
-        sa.Column("planned_at", sa.DateTime(timezone=True)),
-        sa.Column("published_at", sa.DateTime(timezone=True)),
-        sa.Column("published_message_id", sa.String(128)),
-        sa.Column("status", sa.String(32), nullable=False, server_default="planned"),
-        sa.UniqueConstraint("campaign_id", "channel_id", name="uq_campaign_channel"),
-    )
-    for name, column in (("ix_campaign_targets_campaign_id", "campaign_id"), ("ix_campaign_targets_list_id", "list_id"), ("ix_campaign_targets_channel_id", "channel_id"), ("ix_campaign_targets_status", "status")):
-        op.create_index(name, "campaign_targets", [column])
 
     op.create_table(
         "price_rules",
@@ -74,18 +61,19 @@ def upgrade() -> None:
     op.create_table(
         "payments",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("order_id", sa.String(36), sa.ForeignKey("ad_orders.id"), nullable=False),
-        sa.Column("provider", sa.String(32), nullable=False),
-        sa.Column("provider_reference", sa.String(255)),
+        sa.Column("order_id", sa.String(36), sa.ForeignKey("ad_orders.id"), nullable=False, unique=True),
+        sa.Column("provider", sa.String(32), nullable=False, server_default="manual"),
+        sa.Column("provider_reference", sa.String(255), unique=True),
         sa.Column("amount", sa.Integer(), nullable=False),
         sa.Column("status", sa.String(32), nullable=False, server_default="pending"),
         sa.Column("idempotency_key", sa.String(128), nullable=False, unique=True),
+        sa.Column("confirmed_by", sa.String(36), sa.ForeignKey("users.id")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("confirmed_at", sa.DateTime(timezone=True)),
-        sa.UniqueConstraint("order_id", "provider", name="uq_payment_order_provider"),
     )
     op.create_index("ix_payments_order_id", "payments", ["order_id"])
     op.create_index("ix_payments_status", "payments", ["status"])
+    op.create_index("ix_payments_idempotency_key", "payments", ["idempotency_key"])
 
     op.create_table(
         "earnings_entries",
@@ -101,11 +89,26 @@ def upgrade() -> None:
     for name, column in (("ix_earnings_entries_order_id", "order_id"), ("ix_earnings_entries_beneficiary_id", "beneficiary_id"), ("ix_earnings_entries_list_id", "list_id")):
         op.create_index(name, "earnings_entries", [column])
 
+    op.create_table(
+        "campaign_targets",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("campaign_id", sa.String(36), sa.ForeignKey("campaigns.id"), nullable=False),
+        sa.Column("list_id", sa.String(36), sa.ForeignKey("lists.id"), nullable=False),
+        sa.Column("channel_id", sa.String(36), sa.ForeignKey("channels.id"), nullable=False),
+        sa.Column("planned_at", sa.DateTime(timezone=True)),
+        sa.Column("published_at", sa.DateTime(timezone=True)),
+        sa.Column("published_message_id", sa.String(128)),
+        sa.Column("status", sa.String(32), nullable=False, server_default="planned"),
+        sa.UniqueConstraint("campaign_id", "channel_id", name="uq_campaign_channel"),
+    )
+    for name, column in (("ix_campaign_targets_campaign_id", "campaign_id"), ("ix_campaign_targets_list_id", "list_id"), ("ix_campaign_targets_channel_id", "channel_id"), ("ix_campaign_targets_status", "status")):
+        op.create_index(name, "campaign_targets", [column])
+
 
 def downgrade() -> None:
+    op.drop_table("campaign_targets")
     op.drop_table("earnings_entries")
     op.drop_table("payments")
     op.drop_table("ad_orders")
     op.drop_table("price_rules")
-    op.drop_table("campaign_targets")
     op.drop_table("campaigns")
