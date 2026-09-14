@@ -22,14 +22,13 @@ def first_attr(obj: Any, *names: str, default: Any = None) -> Any:
 
 
 def update_key(msg: Any) -> str | None:
-    """Return a stable FastRub update key when the event exposes one."""
     event = first_attr(msg, "new_message", default=msg)
     update_id = first_attr(msg, "update_id", "id", default=None)
     if update_id is not None:
         return f"update:{update_id}"
     message_id = first_attr(msg, "message_id", default=None)
     if message_id is None:
-        message_id = first_attr(event, "message_id", "message_id", default=None)
+        message_id = first_attr(event, "message_id", default=None)
     sender_id = first_attr(msg, "sender_id", default=None) or first_attr(
         event, "author_object_guid", "author_guid", "user_guid", default=None
     )
@@ -50,9 +49,9 @@ def is_duplicate_update(msg: Any) -> bool:
     if key is None:
         return False
     now = time.monotonic()
-    stale = [item for item, seen_at in _SEEN_UPDATES.items() if now - seen_at > _DEDUP_WINDOW_SECONDS]
-    for item in stale:
-        _SEEN_UPDATES.pop(item, None)
+    for item, seen_at in list(_SEEN_UPDATES.items()):
+        if now - seen_at > _DEDUP_WINDOW_SECONDS:
+            _SEEN_UPDATES.pop(item, None)
     if key in _SEEN_UPDATES:
         return True
     _SEEN_UPDATES[key] = now
@@ -77,7 +76,8 @@ def update_user_id(msg: Any) -> str | None:
 
 def update_text(msg: Any) -> str:
     event = first_attr(msg, "new_message", default=msg)
-    return str(first_attr(event, "text", "message_text", default="") or "").strip()
+    text = str(first_attr(event, "text", "message_text", default="") or "").strip()
+    return "/start" if text == "↩️ بازگشت" else text
 
 
 def button_id(msg: Any) -> str:
@@ -92,7 +92,14 @@ def button_id(msg: Any) -> str:
     return str(first_attr(aux, "button_id", default="") or "")
 
 
+def _add_back_row(rows: tuple[tuple[str, str], ...]) -> tuple[tuple[str, str], ...]:
+    if any(button in {"home", "back"} or label == "↩️ بازگشت" for row in rows for button, label in row):
+        return rows
+    return (*rows, (("home", "↩️ بازگشت"),))
+
+
 def _build_keyboard(rows: tuple[tuple[str, str], ...], *, callback: bool) -> Any:
+    rows = _add_back_row(rows)
     keypad = KeyPad()
     for row in rows:
         keypad.append(*(keypad.simple(button, label) for button, label in row))
