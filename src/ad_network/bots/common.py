@@ -28,12 +28,12 @@ def update_key(event: Any) -> str | None:
     if update_id is not None:
         return f"update:{update_id}"
     message_id = first_attr(event, "message_id", "message_id_string", "msg_id", default=None)
-    author_id = first_attr(event, "author_id", "sender_id", "author_guid", "user_guid", default=None)
+    author_id = first_attr(event, "user_guid", "author_id", "sender_id", "author_guid", default=None)
     if message_id is not None:
         return f"message:{author_id or '-'}:{message_id}"
-    button = first_attr(event, "button_id", default=None)
+    button = first_attr(event, "button_id", "callback_button_id", default=None)
     if button:
-        chat_id = first_attr(event, "chat_id", "chat_guid", default=None)
+        chat_id = first_attr(event, "chat_id", "chat_guid", "object_guid", default=None)
         return f"button:{chat_id or author_id or '-'}:{button}"
     return None
 
@@ -53,7 +53,7 @@ def is_duplicate_update(event: Any) -> bool:
 
 
 def update_user_id(event: Any) -> str | None:
-    user_id = first_attr(event, "author_id", "sender_id", "author_guid", "user_guid", default=None)
+    user_id = first_attr(event, "user_guid", "author_id", "sender_id", "author_guid", default=None)
     if user_id:
         username = first_attr(event, "username", "author_username", "sender_username", default=None)
         if username:
@@ -63,14 +63,14 @@ def update_user_id(event: Any) -> str | None:
 
 
 async def resolve_user(bot: Any, event: Any) -> str | None:
-    user_id = update_user_id(event) or first_attr(event, "chat_id", "chat_guid", default=None)
+    user_id = update_user_id(event) or first_attr(event, "chat_id", "chat_guid", "object_guid", default=None)
     if not user_id:
         return None
 
     username = first_attr(event, "username", "author_username", "sender_username", default=None)
-    if not username and str(user_id).startswith(("u0", "b0")):
+    if not username and str(user_id).startswith("u0"):
         get_user_info = getattr(bot, "get_user_info", None)
-        if callable(get_user_info) and str(user_id).startswith("u0"):
+        if callable(get_user_info):
             try:
                 info = await get_user_info(str(user_id))
                 data = first_attr(info, "data", default=None)
@@ -82,7 +82,7 @@ async def resolve_user(bot: Any, event: Any) -> str | None:
                 username = None
 
     if not username:
-        chat_id = first_attr(event, "chat_id", "chat_guid", default=user_id)
+        chat_id = first_attr(event, "chat_id", "chat_guid", "object_guid", default=user_id)
         try:
             info = await bot.get_chat_info(chat_id)
             data = first_attr(info, "data", default=None)
