@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from sqlalchemy import select
 
 from ..core.account_management import AccountManagementService
@@ -69,7 +67,7 @@ async def account_button(message, action: str, runtime) -> bool:
             try:
                 await runtime.connect(account)
                 await reply(message, "✅ Session با موفقیت متصل است.")
-            except Exception as exc:
+            except RuntimeError as exc:
                 await reply(message, f"❌ اتصال ناموفق: {exc}")
             return True
         if op == "replace":
@@ -83,7 +81,7 @@ async def account_button(message, action: str, runtime) -> bool:
                 await db.commit()
                 await runtime.disconnect(account.id)
                 await reply(message, "⛔ اکانت غیرفعال و از Runtime خارج شد.")
-            except Exception as exc:
+            except (ValueError, RuntimeError) as exc:
                 await db.rollback(); await reply(message, f"❌ عملیات ناموفق: {exc}")
             return True
     return False
@@ -121,6 +119,6 @@ async def account_text(message, runtime) -> bool:
     try:
         await runtime.connect(account)
         await reply(message, "✅ اکانت ثبت و Session متصل شد.")
-    except Exception as exc:
+    except RuntimeError as exc:
         await reply(message, f"⚠️ ثبت شد ولی اتصال ناموفق بود: {exc}")
     return True
