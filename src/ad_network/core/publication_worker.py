@@ -4,16 +4,16 @@ from typing import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..adapters.rubika import FastRubikaGateway, RubikaGateway
+from ..adapters.rubika import MaxRubikaGateway, RubikaGateway
 from .list_accounts import ListAccountResolver, ListAccountService
 from .models import Channel
-from .publisher import PublicationService
+from .publisher import PublicationService, RotationExecutor
 
 logger = logging.getLogger(__name__)
 
 
 class PublicationWorker:
-    """Background publisher that always uses the operational account of each List."""
+    """Compatibility worker for applications that run publication separately."""
 
     def __init__(
         self,
@@ -34,53 +34,26 @@ class PublicationWorker:
                 try:
                     account = await ListAccountService(db).require_active(target.list_id)
                     client = self.account_resolver.resolve(account)
-                    gateway: RubikaGateway = (
-                        client if isinstance(client, FastRubikaGateway)
-                        else FastRubikaGateway(client)
-                    )
+                    gateway: RubikaGateway = MaxRubikaGateway(client)
                     source_guid, source_message_id = await self.source_resolver(target, client)
-                    await service.claim(target)
                     channel = await db.get(Channel, target.channel_id)
                     if channel is None:
                         await service.mark_failed(target)
                         continue
-                    result = await gateway.forward(source_guid, channel.rubika_guid, source_message_id)
-                    message_id = self._message_id(result)
-                    if not message_id:
-                        raise RuntimeError("Rubika forward response did not contain a message id")
-                    await service.mark_published(target, message_id)
-                    published += 1
+                    if await RotationExecutor(db, gateway).execute(
+                        target,
+                        source_guid=source_guid,
+                        source_message_id=source_message_id,
+                    ):
+                        published += 1
                 except Exception:
                     logger.exception("publication target failed: %s", target.id)
-                    try:
+                    if target.status == "running":
                         await service.mark_failed(target)
-                    except Exception:
-                        logger.exception("failed to mark target failed: %s", target.id)
             await db.commit()
         return published
-
-    @staticmethod
-    def _message_id(result: object) -> str | None:
-        if isinstance(result, dict):
-            for key in ("message_id", "id"):
-                value = result.get(key)
-                if value:
-                    return str(value)
-            for key in ("messages", "message"):
-                value = result.get(key)
-                if isinstance(value, list) and value:
-                    return PublicationWorker._message_id(value[0])
-                if value:
-                    return PublicationWorker._message_id(value)
-        if isinstance(result, list) and result:
-            return PublicationWorker._message_id(result[0])
-        for key in ("message_id", "id"):
-            value = getattr(result, key, None)
-            if value:
-                return str(value)
-        return None
 
     async def run_forever(self, *, interval_seconds: float = 5.0, limit: int = 20) -> None:
         while True:
             await self.run_once(limit=limit)
-            await asyncio.sleep(interval_seconds)
+            await asyncio.sleep(max(1.0, interval_seconds))
