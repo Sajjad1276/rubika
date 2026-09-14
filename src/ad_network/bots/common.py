@@ -20,14 +20,6 @@ def first_attr(obj: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
-def _data_attr(obj: Any, *names: str, default: Any = None) -> Any:
-    value = first_attr(obj, *names, default=None)
-    if value is not None:
-        return value
-    data = first_attr(obj, "data", default=None)
-    return first_attr(data, *names, default=default)
-
-
 def update_key(event: Any) -> str | None:
     update_id = first_attr(event, "update_id", "id", default=None)
     if update_id is not None:
@@ -68,19 +60,16 @@ def update_user_id(event: Any) -> str | None:
 
 
 async def resolve_user(bot: Any, event: Any) -> str | None:
-    """Resolve the sender ID and username using MAXRubika event/chat data."""
-    user_id = update_user_id(event)
-    if not user_id:
-        user_id = first_attr(event, "chat_id", default=None)
+    user_id = update_user_id(event) or first_attr(event, "chat_id", default=None)
     if not user_id:
         return None
-
     username = first_attr(event, "username", "author_username", "sender_username", default=None)
     if not username:
         chat_id = first_attr(event, "chat_id", default=user_id)
         try:
             info = await bot.get_chat_info(chat_id)
-            chat = first_attr(first_attr(info, "data", default=None), "chat", default=None)
+            data = first_attr(info, "data", default=None)
+            chat = first_attr(data, "chat", default=None)
             username = first_attr(chat, "username", "user_name", default=None)
         except Exception:
             username = None
@@ -90,12 +79,17 @@ async def resolve_user(bot: Any, event: Any) -> str | None:
 
 
 def update_text(event: Any) -> str:
-    text = first_attr(event, "text", "message_text", default="")
-    return str(text or "").strip()
+    return str(first_attr(event, "text", "message_text", default="") or "").strip()
 
 
 def button_id(event: Any) -> str:
-    return str(first_attr(event, "button_id", "data", default="") or "")
+    return str(first_attr(event, "button_id", default="") or "")
+
+
+def _add_back_row(rows: tuple[tuple[tuple[str, str], ...], ...]) -> tuple[tuple[tuple[str, str], ...], ...]:
+    if any(button in {"home", "back"} or label == "↩️ بازگشت" for row in rows for button, label in row):
+        return rows
+    return (*rows, (("home", "↩️ بازگشت"),))
 
 
 def _keyboard(rows: tuple[tuple[tuple[str, str], ...], ...]) -> dict[str, Any]:
@@ -107,20 +101,12 @@ def _keyboard(rows: tuple[tuple[tuple[str, str], ...], ...]) -> dict[str, Any]:
     }
 
 
-def _add_back_row(rows: tuple[tuple[str, str], ...]) -> tuple[tuple[str, str], ...]:
-    if any(button in {"home", "back"} or label == "↩️ بازگشت" for button, label in rows):
-        return rows
-    return (*rows, ("home", "↩️ بازگشت"))
-
-
 def inline_keyboard(*rows: tuple[tuple[str, str], ...]) -> dict[str, Any]:
-    flat = _add_back_row(tuple(button for row in rows for button in row))
-    return _keyboard(tuple((item,) for item in flat))
+    return _keyboard(_add_back_row(rows))
 
 
 def quick_keyboard(*rows: tuple[tuple[str, str], ...]) -> dict[str, Any]:
-    flat = _add_back_row(tuple(button for row in rows for button in row))
-    return _keyboard(tuple((item,) for item in flat))
+    return _keyboard(_add_back_row(rows))
 
 
 async def reply(event: Any, text: str, *, inline_keypad: Any = None, keypad: Any = None) -> Any:
@@ -131,12 +117,9 @@ async def reply(event: Any, text: str, *, inline_keypad: Any = None, keypad: Any
         kwargs["chat_keypad"] = keypad
         kwargs["resize_keyboard"] = True
     method = getattr(event, "reply", None)
-    if method is not None:
-        return await method(text, **kwargs)
-    bot = first_attr(event, "bot", default=None)
-    if bot is None:
+    if method is None:
         raise RuntimeError("MAXRubika event does not expose reply()")
-    return await bot.send_message(chat_id=first_attr(event, "chat_id"), text=text, **kwargs)
+    return await method(text, **kwargs)
 
 
 @dataclass(frozen=True)
