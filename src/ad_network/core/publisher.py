@@ -104,12 +104,19 @@ class RotationPlanner:
         list_id: str,
         start_at: datetime,
         interval_seconds: int = 60,
+        channel_count: int | None = None,
     ) -> int:
         from .campaigns import CampaignService
 
         if interval_seconds < 1:
             raise ValueError("interval_seconds must be positive")
-        created = await CampaignService(self.db).target_list(campaign, list_id)
+        created = await CampaignService(self.db).target_list(
+            campaign,
+            list_id,
+            channel_count=channel_count,
+            start_at=start_at,
+            interval_seconds=interval_seconds,
+        )
         targets = list((await self.db.scalars(
             select(CampaignTarget).where(
                 CampaignTarget.campaign_id == campaign.id,
