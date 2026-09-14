@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, select
@@ -66,27 +66,51 @@ class CampaignService:
         await self.db.flush()
         return campaign
 
-    async def target_list(self, campaign: Campaign, list_id: str, planned_at: datetime | None = None) -> int:
+    async def target_list(
+        self,
+        campaign: Campaign,
+        list_id: str,
+        *,
+        channel_count: int | None = None,
+        start_at: datetime | None = None,
+        interval_seconds: int = 60,
+    ) -> int:
         network_list = await self.db.get(ListNetwork, list_id)
         if network_list is None or not network_list.active:
             raise ValueError("Active list not found")
-        channels = (
-            await self.db.scalars(
-                select(Channel).where(
-                    Channel.list_id == list_id,
-                    Channel.status == ChannelStatus.ACTIVE,
-                ).order_by(Channel.list_code)
+        if channel_count is not None and channel_count <= 0:
+            raise ValueError("channel_count must be positive")
+        if interval_seconds < 1:
+            raise ValueError("interval_seconds must be positive")
+
+        query = select(Channel).where(
+            Channel.list_id == list_id,
+            Channel.status == ChannelStatus.ACTIVE,
+        ).order_by(Channel.list_code, Channel.id)
+        if channel_count is not None:
+            query = query.limit(channel_count)
+        channels = (await self.db.scalars(query)).all()
+
+        if channel_count is not None and len(channels) < channel_count:
+            raise ValueError(
+                f"List has only {len(channels)} active channels; {channel_count} required"
             )
-        ).all()
+
+        base_time = start_at or datetime.now(timezone.utc)
         created = 0
-        for channel in channels:
+        for index, channel in enumerate(channels):
             exists = await self.db.scalar(select(CampaignTarget.id).where(
                 CampaignTarget.campaign_id == campaign.id,
                 CampaignTarget.channel_id == channel.id,
             ))
             if exists:
                 continue
-            self.db.add(CampaignTarget(campaign_id=campaign.id, list_id=list_id, channel_id=channel.id, planned_at=planned_at))
+            self.db.add(CampaignTarget(
+                campaign_id=campaign.id,
+                list_id=list_id,
+                channel_id=channel.id,
+                planned_at=base_time + timedelta(seconds=index * interval_seconds),
+            ))
             created += 1
         await self.db.flush()
         return created
