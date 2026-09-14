@@ -11,13 +11,13 @@ from ..core.models import Channel, ListNetwork, RegistrationSource
 from ..core.payments import prepare_payment
 from ..core.roles import RoleService
 from ..core.services import RegistrationService
-from .common import button_id, inline_keyboard, reply, update_text, update_user_id
+from .common import button_id, inline_keyboard, quick_keyboard, reply, update_text, update_user_id
 
 CHANNEL_RE = re.compile(r"(?:https?://)?(?:rubika\.ir/)?(@?[A-Za-z0-9_]+)$")
 
 
 def main_keyboard():
-    return inline_keyboard(
+    return quick_keyboard(
         (("register", "📺 ثبت کانال"), ("status", "📊 وضعیت کانال")),
         (("ad", "📢 درخواست تبلیغ"), ("prices", "💰 تعرفه‌ها")),
         (("support", "🆘 پشتیبانی"),),
@@ -25,7 +25,7 @@ def main_keyboard():
 
 
 async def send_main(message):
-    await reply(message, "📣 شبکه تبلیغات\n\nاز منوی زیر انتخاب کنید:", inline_keypad=main_keyboard())
+    await reply(message, "📣 شبکه تبلیغات\n\nاز منوی زیر انتخاب کنید:", keypad=main_keyboard())
 
 
 class RegisterForm(DataForm):
@@ -74,7 +74,7 @@ async def build_user_bot(settings: Settings) -> Client:
             request = await RegistrationService(db).start(rubika_guid=channel_ref, applicant=user, source=RegistrationSource.SELF, list_id=network_list.id)
             await RegistrationService(db).submit_for_verification(request)
             await db.commit()
-            await reply(message, f"✅ درخواست ثبت شد.\nکد پیگیری: {request.id[:8]}", inline_keypad=main_keyboard())
+            await reply(message, f"✅ درخواست ثبت شد.\nکد پیگیری: {request.id[:8]}", keypad=main_keyboard())
         return Conversation.END
 
     @ad.entry_form(AdForm, commands=["ad"])
@@ -101,7 +101,7 @@ async def build_user_bot(settings: Settings) -> Client:
                          f"مدت: {order.retention_hours} ساعت\n"
                          f"قیمت هر کانال: {unit:,}\nمبلغ کل: {total:,}\n"
                          f"شناسه سفارش: {order.id[:8]}\nشناسه پرداخت: {payment.reference}\n\n"
-                         "پرداخت پس از بررسی ادمین تأیید می‌شود.", inline_keypad=main_keyboard())
+                         "پرداخت پس از بررسی ادمین تأیید می‌شود.", keypad=main_keyboard())
         return Conversation.END
 
     @status.entry_form(StatusForm, commands=["status"])
@@ -109,12 +109,12 @@ async def build_user_bot(settings: Settings) -> Client:
         async with SessionFactory() as db:
             channel = await db.scalar(select(Channel).where(Channel.rubika_guid == data["channel"].strip().lstrip("@")))
             await db.commit()
-            await reply(message, f"📊 وضعیت: {channel.status.value}\nکد لیست: {channel.list_code or '-'}" if channel else "❌ کانال پیدا نشد.", inline_keypad=main_keyboard())
+            await reply(message, f"📊 وضعیت: {channel.status.value}\nکد لیست: {channel.list_code or '-'}" if channel else "❌ کانال پیدا نشد.", keypad=main_keyboard())
         return Conversation.END
 
     @support.entry_form(SupportForm, commands=["support"])
     async def support_done(message, data):
-        await reply(message, "✅ درخواست پشتیبانی ثبت شد.", inline_keypad=main_keyboard())
+        await reply(message, "✅ درخواست پشتیبانی ثبت شد.", keypad=main_keyboard())
         return Conversation.END
 
     for conversation in (register, ad, status, support): bot.add_conversation(conversation)
@@ -131,8 +131,10 @@ async def build_user_bot(settings: Settings) -> Client:
     async def handle(message):
         text = update_text(message)
         if text in {"/start", "شروع", "منو", "menu"}: await send_main(message)
-        elif text in {"ثبت کانال", "درخواست تبلیغ", "وضعیت کانال", "پشتیبانی"}:
-            mapping = {"ثبت کانال": "/register", "درخواست تبلیغ": "/ad", "وضعیت کانال": "/status", "پشتیبانی": "/support"}
-            await reply(message, f"برای شروع: {mapping[text]}")
+        elif text == "📺 ثبت کانال": await reply(message, "برای شروع: /register")
+        elif text == "📢 درخواست تبلیغ": await reply(message, "برای شروع: /ad")
+        elif text == "📊 وضعیت کانال": await reply(message, "برای شروع: /status")
+        elif text == "🆘 پشتیبانی": await reply(message, "برای شروع: /support")
+        elif text == "💰 تعرفه‌ها": await reply(message, "💰 تعرفه بر اساس لیست، تعداد کانال و مدت ماندگاری در /ad محاسبه می‌شود.", keypad=main_keyboard())
 
     return bot
