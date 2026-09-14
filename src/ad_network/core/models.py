@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 from uuid import uuid4
+import sys
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -181,8 +182,9 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-# Import secondary model modules after the base models are fully declared so
-# Base.metadata always contains every ORM table, even when callers import Base
-# directly (for example test fixtures and migration tooling).
-from .campaigns import Campaign, CampaignTarget  # noqa: E402, F401
-from .commerce import AdOrder, EarningsEntry, Payment, PriceRule  # noqa: E402, F401
+# Register secondary model modules when models.py is the entry point. During a
+# circular import, the importing module will finish registering its own models.
+if "ad_network.core.campaigns" not in sys.modules:
+    from .campaigns import Campaign, CampaignTarget  # noqa: E402, F401
+if "ad_network.core.commerce" not in sys.modules:
+    from .commerce import AdOrder, EarningsEntry, Payment, PriceRule  # noqa: E402, F401
