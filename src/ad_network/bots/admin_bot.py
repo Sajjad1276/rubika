@@ -2,6 +2,7 @@ from fast_rub import Client
 from sqlalchemy import select
 
 from ..adapters.list_account import ListAccountGatewayResolver
+from ..core.account_runtime import ListAccountRuntime
 from ..core.commerce import AdOrder, CommerceService, Payment, PaymentStatus
 from ..core.config import Settings
 from ..core.db import SessionFactory
@@ -9,20 +10,25 @@ from ..core.list_accounts import ListAccountResolver, ListAccountService
 from ..core.models import Channel, RegistrationRequest, RegistrationStatus, UserRole
 from ..core.roles import RoleService
 from ..core.services import RegistrationService, VerificationService
+from .account_routes import account_button, account_text
 from .common import button_id, inline_keyboard, reply, update_text, update_user_id
 
 
 def admin_keyboard():
     return inline_keyboard(
         (("requests", "📥 درخواست‌ها"), ("payments", "💳 پرداخت‌ها")),
-        (("channels", "📺 کانال‌ها"), ("tasks", "📋 وظایف")),
-        (("recruit", "🎯 جذب کانال"), ("campaigns", "📣 عملیات تبلیغ")),
-        (("violations", "⚠️ تخلفات"), ("performance", "📈 عملکرد")),
-        (("training", "🎓 آموزش"),),
+        (("accounts", "👤 اکانت‌های لیست"), ("channels", "📺 کانال‌ها")),
+        (("tasks", "📋 وظایف"), ("recruit", "🎯 جذب کانال")),
+        (("campaigns", "📣 عملیات تبلیغ"), ("violations", "⚠️ تخلفات")),
+        (("performance", "📈 عملکرد"), ("training", "🎓 آموزش")),
     )
 
 
-async def build_admin_bot(settings: Settings, account_resolver: ListAccountResolver | None = None) -> Client:
+async def build_admin_bot(
+    settings: Settings,
+    account_resolver: ListAccountResolver | None = None,
+    account_runtime: ListAccountRuntime | None = None,
+) -> Client:
     bot = Client("rubika_admin_bot", settings.admin_bot_token)
     gateway_resolver = ListAccountGatewayResolver(account_resolver) if account_resolver else None
 
@@ -60,6 +66,13 @@ async def build_admin_bot(settings: Settings, account_resolver: ListAccountResol
                 await db.commit(); await reply(message, "⛔ دسترسی ندارید."); return
             if action == "home":
                 await db.commit(); await reply(message, "🛠 داشبورد ادمین", inline_keypad=admin_keyboard()); return
+            if action == "accounts" or action.startswith("account:"):
+                await db.commit()
+                if account_runtime is None:
+                    await reply(message, "⛔ Runtime اکانت‌ها در دسترس نیست.")
+                else:
+                    await account_button(message, action, account_runtime)
+                return
             if action == "requests":
                 await db.commit(); await show_requests(message, user); return
             if action == "payments":
@@ -137,6 +150,8 @@ async def build_admin_bot(settings: Settings, account_resolver: ListAccountResol
         user_id = update_user_id(message)
         if not user_id: return
         text = update_text(message)
+        if text and account_runtime is not None and await account_text(message, account_runtime):
+            return
         async with SessionFactory() as db:
             user = await RoleService(db, settings).get_or_create_user(rubika_user_id=user_id)
             allowed = RoleService(db, settings).has(user, UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.OWNER)
