@@ -3,7 +3,7 @@ import logging
 
 from sqlalchemy import select
 
-from ..adapters.rubika import FastRubikaGateway
+from ..adapters.rubika import MaxRubikaGateway
 from .campaigns import Campaign, CampaignTarget
 from .db import SessionFactory
 from .list_accounts import ListAccountResolver
@@ -54,7 +54,8 @@ class NetworkWorker:
             if account is None:
                 logger.warning("No active List account for list %s", target.list_id)
                 continue
-            if account.id not in self.accounts.clients:
+            client = self.accounts.clients.get(account.id)
+            if client is None:
                 logger.warning("List account %s is offline", account.id)
                 continue
             campaign = await db.get(Campaign, target.campaign_id)
@@ -62,9 +63,11 @@ class NetworkWorker:
                 continue
             try:
                 source_guid, source_message_id = self._parse_content_ref(campaign.content_ref)
-                gateway = FastRubikaGateway(self.accounts.clients[account.id])
+                gateway = MaxRubikaGateway(client)
                 await RotationExecutor(db, gateway).execute(
-                    target, source_guid=source_guid, source_message_id=source_message_id
+                    target,
+                    source_guid=source_guid,
+                    source_message_id=source_message_id,
                 )
             except Exception:
                 logger.exception("Unable to publish target %s", target.id)
@@ -81,7 +84,7 @@ class NetworkWorker:
             if account is None or account.id not in self.accounts.clients:
                 continue
             try:
-                gateway = FastRubikaGateway(self.accounts.clients[account.id])
+                gateway = MaxRubikaGateway(self.accounts.clients[account.id])
                 await RetentionMonitor(db, gateway).check(target)
             except Exception:
                 logger.exception("Retention check failed for target %s", target.id)
@@ -104,9 +107,9 @@ class NetworkWorker:
 
     async def _account_for_list(self, db, list_id: str) -> ListAccount | None:
         return await db.scalar(
-            select(ListAccount).where(
-                ListAccount.list_id == list_id, ListAccount.active.is_(True)
-            ).order_by(ListAccount.id)
+            select(ListAccount)
+            .where(ListAccount.list_id == list_id, ListAccount.active.is_(True))
+            .order_by(ListAccount.id)
         )
 
     @staticmethod
