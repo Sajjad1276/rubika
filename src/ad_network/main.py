@@ -35,6 +35,19 @@ async def sync_list_accounts(runtime: ListAccountRuntime, stop: asyncio.Event) -
             pass
 
 
+async def prepare_bot(bot) -> None:
+    """Initialize FastRub before enabling decorators registered by the builders.
+
+    FastRub initializes its update flags during start(). The project builders
+    register handlers before run(), so run() would otherwise reset those flags
+    and raise "No update types selected". Starting here preserves the already
+    registered handlers and explicitly enables the polling/button update loops.
+    """
+    await bot.start()
+    bot._fetch_messages_polling = True
+    bot._fetch_buttons = True
+
+
 async def main() -> None:
     configure_logging()
     settings = get_settings()
@@ -57,6 +70,12 @@ async def main() -> None:
     user_bot = await build_user_bot(settings)
     admin_bot = await build_admin_bot(settings, account_resolver, account_runtime)
     owner_bot = await build_owner_bot(settings)
+
+    await asyncio.gather(
+        prepare_bot(user_bot),
+        prepare_bot(admin_bot),
+        prepare_bot(owner_bot),
+    )
 
     tasks = [
         asyncio.create_task(user_bot.run(), name="user-bot"),
