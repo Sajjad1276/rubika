@@ -9,6 +9,7 @@ from ..core.db import SessionFactory
 from ..core.list_accounts import ListAccountResolver, ListAccountService
 from ..core.models import (
     Channel,
+    ListNetwork,
     RegistrationRequest,
     RegistrationSource,
     RegistrationStatus,
@@ -21,6 +22,8 @@ from ..core.roles import RoleService
 from ..core.services import RegistrationService, VerificationService
 from .account_routes import account_button, account_text
 from .common import button_id, inline_keyboard, is_duplicate_update, quick_keyboard, reply, resolve_user, update_text
+
+_RECRUIT_STATES: dict[str, str] = {}
 
 
 def admin_keyboard():
@@ -145,8 +148,8 @@ async def build_admin_bot(
             pending_verification = sum(row.status == RegistrationStatus.PENDING_VERIFICATION for row in rows)
         await reply(
             event,
-            f"🎯 جذب کانال\n\nسرنخ‌های باز: {len(rows)}\nدر انتظار احراز: {pending_verification}\n\nثبت جذب از مسیر عملیاتی درخواست انجام می‌شود.",
-            keypad=admin_keyboard(),
+            f"🎯 جذب کانال\n\nسرنخ‌های باز: {len(rows)}\nدر انتظار احراز: {pending_verification}",
+            inline_keypad=inline_keyboard((("recruit:start", "➕ ثبت کانال جذب‌شده"),)),
         )
 
     async def handle_action(event, action: str):
@@ -161,6 +164,7 @@ async def build_admin_bot(
                 await reply(event, "⛔ دسترسی ندارید.")
                 return
             if action in {"home", "back"}:
+                _RECRUIT_STATES.pop(user_id, None)
                 await db.commit()
                 await reply(event, "🛠 داشبورد ادمین", keypad=admin_keyboard())
                 return
@@ -187,6 +191,11 @@ async def build_admin_bot(
                 await db.commit(); await show_tasks(event, user.id); return
             if action == "recruit":
                 await db.commit(); await show_recruitment(event); return
+            if action == "recruit:start":
+                _RECRUIT_STATES[user_id] = "recruit"
+                await db.commit()
+                await reply(event, "🎯 فرمت جذب: شناسه کانال | کد لیست\nمثال: @mychannel | 001")
+                return
             if action == "training":
                 await db.commit()
                 await reply(event, "🎓 آموزش شبکه\n\n1) احراز دسترسی کانال\n2) بررسی اکانت عملیاتی لیست\n3) تأیید پرداخت\n4) پایش ماندگاری\n5) ثبت تخلف و پیگیری آن", keypad=admin_keyboard())
@@ -304,10 +313,39 @@ async def build_admin_bot(
         if text and account_runtime is not None and await account_text(event, account_runtime, bot):
             return
         if text in {"/start", "منو", "menu", "↩️ بازگشت"}:
+            _RECRUIT_STATES.pop(user_id, None)
             await reply(event, "🛠 داشبورد ادمین", keypad=admin_keyboard()); return
-        action = mapping.get(text)
-        if action:
-            await handle_action(event, action); return
+        if _RECRUIT_STATES.get(user_id) == "recruit":
+            parts = [x.strip() for x in text.split("|")]
+            if len(parts) != 2 or not all(parts):
+                await reply(event, "❌ فرمت: شناسه کانال | کد لیست")
+                return
+            async with SessionFactory() as db:
+                roles = RoleService(db, settings)
+                user = await roles.get_or_create_user(rubika_user_id=user_id)
+                if not roles.has(user, UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.OWNER):
+                    await db.rollback(); _RECRUIT_STATES.pop(user_id, None); await reply(event, "⛔ دسترسی ندارید."); return
+                code = parts[1].lstrip("#")
+                network = await db.scalar(select(ListNetwork).where(ListNetwork.code == code, ListNetwork.active.is_(True)))
+                if network is None:
+                    await db.rollback(); await reply(event, "❌ کد لیست فعال پیدا نشد."); return
+                try:
+                    request = await RegistrationService(db).start(
+                        rubika_guid=parts[0],
+                        applicant=user,
+                        source=RegistrationSource.ADMIN_RECRUITED,
+                        recruited_by_admin_id=user.id,
+                        list_id=network.id,
+                    )
+                    await RegistrationService(db).submit_for_verification(request)
+                    await db.commit()
+                    _RECRUIT_STATES.pop(user_id, None)
+                    await reply(event, f"✅ جذب ثبت شد. درخواست {request.id[:8]} در صف احراز قرار گرفت.", keypad=admin_keyboard())
+                except ValueError as exc:
+                    await db.rollback(); await reply(event, f"❌ جذب ثبت نشد: {exc}")
+            return
+        if text in mapping:
+            await handle_action(event, mapping[text]); return
         async with SessionFactory() as db:
             user = await RoleService(db, settings).get_or_create_user(rubika_user_id=user_id)
             allowed = RoleService(db, settings).has(user, UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.OWNER)
