@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fast_rub.pyrubi import Client as PyrubiClient
+from maxrubika import Messenger
 
 from .config import get_settings
 from .list_accounts import ListAccountResolver
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class ListAccountRuntime:
-    """Runtime registry for the currently active List operational accounts."""
+    """Runtime registry for active List accounts using MAXRubika Messenger."""
 
     def __init__(self, resolver: ListAccountResolver):
         self.resolver = resolver
@@ -39,7 +39,7 @@ class ListAccountRuntime:
         if existing is not None:
             await self.disconnect(account.id)
 
-        client = PyrubiClient(session=str(session), run_start=False)
+        client = Messenger(session=str(session), api_version=6, max_retries=5)
         await client.start()
         self.resolver.bind(account.id, client)
         self._session_refs[account.id] = str(session)
@@ -47,14 +47,11 @@ class ListAccountRuntime:
         return client
 
     async def sync_active_accounts(self, accounts: list[Any]) -> None:
-        """Reconcile live clients with the DB's current active-account set."""
         active = {account.id: account for account in accounts}
-
         for account_id in list(self.resolver.clients):
             if account_id not in active:
                 await self.disconnect(account_id)
-                logger.info("List account disconnected because it is no longer active: %s", account_id)
-
+                logger.info("List account disconnected: %s", account_id)
         for account in accounts:
             try:
                 await self.connect(account)
@@ -65,8 +62,13 @@ class ListAccountRuntime:
         client = self.resolver.clients.get(account_id)
         if client is not None:
             close = getattr(client, "close", None)
-            if close is not None:
+            stop = getattr(client, "stop", None)
+            if callable(close):
                 result = close()
+                if hasattr(result, "__await__"):
+                    await result
+            elif callable(stop):
+                result = stop()
                 if hasattr(result, "__await__"):
                     await result
         self.resolver.unbind(account_id)
