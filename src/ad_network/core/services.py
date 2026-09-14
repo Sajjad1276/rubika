@@ -54,9 +54,10 @@ class RegistrationService:
         recruited_by_admin_id: str | None = None,
         list_id: str | None = None,
     ) -> RegistrationRequest:
-        channel = await self.db.scalar(select(Channel).where(Channel.rubika_guid == rubika_guid.strip()))
+        channel_ref = rubika_guid.strip()
+        channel = await self.db.scalar(select(Channel).where(Channel.rubika_guid == channel_ref))
         if channel is None:
-            channel = Channel(rubika_guid=rubika_guid.strip(), status=ChannelStatus.PENDING, list_id=list_id)
+            channel = Channel(rubika_guid=channel_ref, status=ChannelStatus.PENDING, list_id=list_id)
             self.db.add(channel)
             await self.db.flush()
         elif channel.status == ChannelStatus.REMOVED:
@@ -98,6 +99,8 @@ class RegistrationService:
         return request
 
     async def submit_for_verification(self, request: RegistrationRequest) -> RegistrationRequest:
+        if request.status == RegistrationStatus.PENDING_VERIFICATION:
+            return request
         if request.status not in {RegistrationStatus.DRAFT, RegistrationStatus.REJECTED}:
             raise ValueError(f"Cannot submit request from state {request.status}")
         request.status = RegistrationStatus.PENDING_VERIFICATION
