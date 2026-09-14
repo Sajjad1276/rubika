@@ -2,6 +2,8 @@ import asyncio
 import logging
 import subprocess
 
+from .core.config import get_settings
+
 
 def _run_migrations() -> None:
     result = subprocess.run(
@@ -22,7 +24,10 @@ async def init_database() -> None:
 
 
 def configure_logging() -> None:
+    level_name = get_settings().log_level.upper()
+    level = getattr(logging, level_name, logging.INFO)
     logging.basicConfig(
-        level=logging.INFO,
+        level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        force=True,
     )
