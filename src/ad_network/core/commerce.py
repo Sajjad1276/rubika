@@ -7,7 +7,7 @@ from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, String, Te
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .models import AuditLog, Base, ListNetwork, User
+from .models import AuditLog, Base, ListAccount, ListNetwork, User
 
 
 def enum_column(enum_cls):
@@ -185,6 +185,12 @@ class CommerceService:
             raise ValueError("Order not found")
         if order.status not in {OrderStatus.AWAITING_PAYMENT, OrderStatus.PAID, OrderStatus.SCHEDULED, OrderStatus.RUNNING}:
             raise ValueError(f"Cannot activate order from state {order.status}")
+        operational_account = await self.db.scalar(select(ListAccount).where(
+            ListAccount.list_id == order.list_id,
+            ListAccount.active.is_(True),
+        ))
+        if operational_account is None:
+            raise ValueError("List has no active operational account")
         if provider_reference:
             duplicate = await self.db.scalar(select(Payment).where(
                 Payment.provider_reference == provider_reference,
@@ -229,6 +235,7 @@ class CommerceService:
                 "order_id": order.id,
                 "amount": payment.amount,
                 "provider_reference": provider_reference,
+                "operational_account_id": operational_account.id,
             }, ensure_ascii=False),
         ))
         await self.db.flush()
