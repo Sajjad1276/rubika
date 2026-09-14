@@ -237,6 +237,11 @@ async def build_admin_bot(
         text = update_text(message)
         if text and account_runtime is not None and await account_text(message, account_runtime):
             return
+        # /start is intentionally public so the bot always answers and shows
+        # its menu. Every actual action remains protected by role checks.
+        if text in {"/start", "منو", "menu"}:
+            await reply(message, "🛠 داشبورد ادمین", inline_keypad=admin_keyboard())
+            return
         async with SessionFactory() as db:
             user = await RoleService(db, settings).get_or_create_user(rubika_user_id=user_id)
             allowed = RoleService(db, settings).has(user, UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.OWNER)
@@ -244,9 +249,7 @@ async def build_admin_bot(
         if not allowed:
             await reply(message, "⛔ دسترسی این ربات فقط برای ادمین‌ها و ناظران شبکه است.")
             return
-        if text in {"/start", "منو", "menu"}:
-            await reply(message, "🛠 داشبورد ادمین", inline_keypad=admin_keyboard())
-        elif text == "3":
+        if text == "3":
             await show_requests(message, user)
 
     return bot
