@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any
-
-from fast_rub.button import KeyPad
 
 from ..core.roles import remember_username
 
@@ -21,31 +20,31 @@ def first_attr(obj: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
-def update_key(msg: Any) -> str | None:
-    event = first_attr(msg, "new_message", default=msg)
-    update_id = first_attr(msg, "update_id", "id", default=None)
+def _data_attr(obj: Any, *names: str, default: Any = None) -> Any:
+    value = first_attr(obj, *names, default=None)
+    if value is not None:
+        return value
+    data = first_attr(obj, "data", default=None)
+    return first_attr(data, *names, default=default)
+
+
+def update_key(event: Any) -> str | None:
+    update_id = first_attr(event, "update_id", "id", default=None)
     if update_id is not None:
         return f"update:{update_id}"
-    message_id = first_attr(msg, "message_id", default=None)
-    if message_id is None:
-        message_id = first_attr(event, "message_id", default=None)
-    sender_id = first_attr(msg, "sender_id", default=None) or first_attr(
-        event, "author_object_guid", "author_guid", "user_guid", default=None
-    )
+    message_id = first_attr(event, "message_id", "message_id_string", default=None)
+    author_id = first_attr(event, "author_id", "sender_id", "author_guid", default=None)
     if message_id is not None:
-        return f"message:{sender_id or '-'}:{message_id}"
-    button = first_attr(msg, "button_id", default=None)
+        return f"message:{author_id or '-'}:{message_id}"
+    button = first_attr(event, "button_id", default=None)
     if button:
-        chat_id = first_attr(msg, "chat_id", default=None)
-        return f"button:{chat_id or sender_id or '-'}:{button}:{message_id or '-'}"
+        chat_id = first_attr(event, "chat_id", default=None)
+        return f"button:{chat_id or author_id or '-'}:{button}"
     return None
 
 
-def is_duplicate_update(msg: Any) -> bool:
-    """Suppress the same FastRub event when polling delivers it more than once."""
-    import time
-
-    key = update_key(msg)
+def is_duplicate_update(event: Any) -> bool:
+    key = update_key(event)
     if key is None:
         return False
     now = time.monotonic()
@@ -58,74 +57,86 @@ def is_duplicate_update(msg: Any) -> bool:
     return False
 
 
-def update_user_id(msg: Any) -> str | None:
-    direct = first_attr(msg, "sender_id", "author_object_guid", "author_guid", "user_guid")
-    event = first_attr(msg, "new_message", default=msg)
-    user_id = direct or first_attr(event, "author_object_guid", "author_guid", "user_guid", "chat_id")
+def update_user_id(event: Any) -> str | None:
+    user_id = first_attr(event, "author_id", "sender_id", "author_guid", "user_guid", default=None)
     if user_id:
-        username = first_attr(
-            msg,
-            "sender_username", "author_username", "username",
-            default=first_attr(event, "sender_username", "author_username", "username"),
-        )
+        username = first_attr(event, "username", "author_username", "sender_username", default=None)
         if username:
             remember_username(str(user_id), str(username))
         return str(user_id)
     return None
 
 
-def update_text(msg: Any) -> str:
-    event = first_attr(msg, "new_message", default=msg)
-    text = str(first_attr(event, "text", "message_text", default="") or "").strip()
-    return "/start" if text == "↩️ بازگشت" else text
+async def resolve_user(bot: Any, event: Any) -> str | None:
+    """Resolve the sender ID and username using MAXRubika event/chat data."""
+    user_id = update_user_id(event)
+    if not user_id:
+        user_id = first_attr(event, "chat_id", default=None)
+    if not user_id:
+        return None
+
+    username = first_attr(event, "username", "author_username", "sender_username", default=None)
+    if not username:
+        chat_id = first_attr(event, "chat_id", default=user_id)
+        try:
+            info = await bot.get_chat_info(chat_id)
+            chat = first_attr(first_attr(info, "data", default=None), "chat", default=None)
+            username = first_attr(chat, "username", "user_name", default=None)
+        except Exception:
+            username = None
+    if username:
+        remember_username(str(user_id), str(username))
+    return str(user_id)
 
 
-def button_id(msg: Any) -> str:
-    direct = first_attr(msg, "button_id", default=None)
-    if direct:
-        return str(direct)
-    event = first_attr(msg, "new_message", default=msg)
-    direct = first_attr(event, "button_id", default=None)
-    if direct:
-        return str(direct)
-    aux = first_attr(event, "aux_data", default=None)
-    return str(first_attr(aux, "button_id", default="") or "")
+def update_text(event: Any) -> str:
+    text = first_attr(event, "text", "message_text", default="")
+    return str(text or "").strip()
+
+
+def button_id(event: Any) -> str:
+    return str(first_attr(event, "button_id", "data", default="") or "")
+
+
+def _keyboard(rows: tuple[tuple[tuple[str, str], ...], ...]) -> dict[str, Any]:
+    return {
+        "rows": [
+            {"buttons": [{"id": button, "type": "Simple", "button_text": label} for button, label in row]}
+            for row in rows
+        ]
+    }
 
 
 def _add_back_row(rows: tuple[tuple[str, str], ...]) -> tuple[tuple[str, str], ...]:
-    if any(button in {"home", "back"} or label == "↩️ بازگشت" for row in rows for button, label in row):
+    if any(button in {"home", "back"} or label == "↩️ بازگشت" for button, label in rows):
         return rows
-    return (*rows, (("home", "↩️ بازگشت"),))
+    return (*rows, ("home", "↩️ بازگشت"))
 
 
-def _build_keyboard(rows: tuple[tuple[str, str], ...], *, callback: bool) -> Any:
-    rows = _add_back_row(rows)
-    keypad = KeyPad()
-    for row in rows:
-        keypad.append(*(keypad.simple(button, label) for button, label in row))
-    return keypad.build()
+def inline_keyboard(*rows: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+    flat = _add_back_row(tuple(button for row in rows for button in row))
+    return _keyboard(tuple((item,) for item in flat))
 
 
-def inline_keyboard(*rows: tuple[tuple[str, str], ...]):
-    return _build_keyboard(rows, callback=True)
+def quick_keyboard(*rows: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+    flat = _add_back_row(tuple(button for row in rows for button in row))
+    return _keyboard(tuple((item,) for item in flat))
 
 
-def quick_keyboard(*rows: tuple[tuple[str, str], ...]):
-    return _build_keyboard(rows, callback=False)
-
-
-async def reply(msg: Any, text: str, *, inline_keypad: Any = None, keypad: Any = None) -> Any:
-    method = getattr(msg, "reply", None)
-    if method is None:
-        method = getattr(msg, "send_text", None)
-    if method is None:
-        raise RuntimeError("FastRub update does not expose reply/send_text")
-    kwargs = {}
+async def reply(event: Any, text: str, *, inline_keypad: Any = None, keypad: Any = None) -> Any:
+    kwargs: dict[str, Any] = {}
     if inline_keypad is not None:
         kwargs["inline_keypad"] = inline_keypad
     if keypad is not None:
-        kwargs["keypad"] = keypad
-    return await method(text, **kwargs)
+        kwargs["chat_keypad"] = keypad
+        kwargs["resize_keyboard"] = True
+    method = getattr(event, "reply", None)
+    if method is not None:
+        return await method(text, **kwargs)
+    bot = first_attr(event, "bot", default=None)
+    if bot is None:
+        raise RuntimeError("MAXRubika event does not expose reply()")
+    return await bot.send_message(chat_id=first_attr(event, "chat_id"), text=text, **kwargs)
 
 
 @dataclass(frozen=True)
