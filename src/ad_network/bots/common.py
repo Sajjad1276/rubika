@@ -5,6 +5,8 @@ from typing import Any
 
 from fast_rub.button import KeyPad
 
+from ..core.roles import remember_username
+
 
 def first_attr(obj: Any, *names: str, default: Any = None) -> Any:
     for name in names:
@@ -18,10 +20,18 @@ def update_user_id(msg: Any) -> str | None:
     # Normal message updates expose the sender on the nested message object.
     # Button updates expose sender_id directly on UpdateButton.
     direct = first_attr(msg, "sender_id", "author_object_guid", "author_guid", "user_guid")
-    if direct:
-        return str(direct)
     event = first_attr(msg, "new_message", default=msg)
-    return first_attr(event, "author_object_guid", "author_guid", "user_guid", "chat_id")
+    user_id = direct or first_attr(event, "author_object_guid", "author_guid", "user_guid", "chat_id")
+    if user_id:
+        username = first_attr(
+            msg,
+            "sender_username", "author_username", "username",
+            default=first_attr(event, "sender_username", "author_username", "username"),
+        )
+        if username:
+            remember_username(str(user_id), str(username))
+        return str(user_id)
+    return None
 
 
 def update_text(msg: Any) -> str:
