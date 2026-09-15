@@ -64,6 +64,8 @@ class RegistrationService:
             raise ValueError("Removed channel cannot be re-registered automatically")
         elif channel.status == ChannelStatus.ACTIVE:
             raise ValueError("Channel is already active")
+        elif list_id is not None and channel.list_id is None:
+            channel.list_id = list_id
 
         existing = await self.db.scalar(select(RegistrationRequest).where(
             RegistrationRequest.channel_id == channel.id,
@@ -284,14 +286,19 @@ class ViolationService:
         admin_id: str | None = None,
         note: str | None = None,
     ) -> Violation:
+        channel = await self.db.get(Channel, channel_id)
+        if channel is None:
+            raise ValueError("Channel not found")
+        normalized_severity = max(1, int(severity))
         violation = Violation(
             channel_id=channel_id,
             admin_id=admin_id,
-            violation_type=violation_type,
-            severity=max(1, severity),
+            violation_type=violation_type.strip(),
+            severity=normalized_severity,
             note=note,
         )
         self.db.add(violation)
+        channel.violation_count = (channel.violation_count or 0) + 1
         await self.db.flush()
         await audit(
             self.db,
@@ -299,6 +306,6 @@ class ViolationService:
             action="violation_recorded",
             entity_type="channel",
             entity_id=channel_id,
-            metadata={"type": violation_type, "severity": severity},
+            metadata={"type": violation_type, "severity": normalized_severity},
         )
         return violation
