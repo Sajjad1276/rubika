@@ -3,19 +3,19 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from .application.runtime import ApplicationRuntime
 from .bootstrap import configure_logging, init_database
 from .bots import build_admin_bot, build_owner_bot, build_user_bot
 from .core.account_runtime import ListAccountRuntime
 from .core.config import get_settings
 from .core.list_accounts import ListAccountResolver
 from .core.network_worker import NetworkWorker
+from .infrastructure.runtime import ApplicationRuntime
 
 logger = logging.getLogger(__name__)
 
 
 async def create_runtime(settings) -> ApplicationRuntime:
-    """Build the complete application graph in one explicit composition root."""
+    """Compose infrastructure, adapters and presentation handlers in one place."""
     account_resolver = ListAccountResolver()
     account_runtime = ListAccountRuntime(account_resolver)
     worker = NetworkWorker(account_resolver)
@@ -41,20 +41,14 @@ async def create_runtime(settings) -> ApplicationRuntime:
 
 def validate_settings(settings) -> None:
     """Fail fast before opening database connections or creating network clients."""
-    required_tokens = {
+    required = {
         "USER_BOT_TOKEN": settings.user_bot_token,
         "ADMIN_BOT_TOKEN": settings.admin_bot_token,
         "OWNER_BOT_TOKEN": settings.owner_bot_token,
-    }
-    missing = [name for name, value in required_tokens.items() if not value]
-    if missing:
-        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
-
-    required_usernames = {
         "OWNER_USERNAME": settings.owner_username,
         "ADMIN_USERNAME": settings.admin_username,
     }
-    missing = [name for name, value in required_usernames.items() if not value]
+    missing = [name for name, value in required.items() if not value]
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
