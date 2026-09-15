@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..adapters.rubika import MaxRubikaGateway
@@ -16,12 +16,11 @@ from .publisher import PublicationService, RotationExecutor
 from .retention_monitor import RetentionMonitor
 
 logger = logging.getLogger(__name__)
-
 GatewayFactory = Callable[[object], MaxRubikaGateway]
 
 
 class NetworkWorker:
-    """Run background network use cases with bounded work per tick."""
+    """Run background network use cases with bounded database work per tick."""
 
     def __init__(
         self,
@@ -111,25 +110,29 @@ class NetworkWorker:
                 logger.exception("Retention check failed for target %s", target.id)
 
     async def _reconcile_campaigns(self, db: AsyncSession) -> None:
-        campaigns = await db.scalars(
-            select(Campaign).where(Campaign.status.in_(["scheduled", "active"]))
-        )
-        for campaign in campaigns.all():
-            targets = list(
-                (
-                    await db.scalars(
-                        select(CampaignTarget).where(CampaignTarget.campaign_id == campaign.id)
-                    )
-                ).all()
+        """Reconcile campaign status with one aggregate query instead of one query per campaign."""
+        rows = await db.execute(
+            select(
+                Campaign.id,
+                func.count(CampaignTarget.id).label("target_count"),
+                func.sum((CampaignTarget.status == "retained").cast(int)).label("retained_count"),
+                func.sum((CampaignTarget.status == "failed").cast(int)).label("failed_count"),
+                func.sum((CampaignTarget.status.in_(["published", "running"])).cast(int)).label(
+                    "active_count"
+                ),
             )
-            if not targets:
-                continue
+            .join(CampaignTarget, CampaignTarget.campaign_id == Campaign.id)
+            .where(Campaign.status.in_(["scheduled", "active"]))
+            .group_by(Campaign.id)
+        )
 
-            statuses = {target.status for target in targets}
-            terminal = {"retained", "failed"}
-            if statuses <= terminal:
-                campaign.status = "completed" if "retained" in statuses else "failed"
-            elif statuses & {"published", "retained", "running"}:
+        for campaign_id, target_count, retained_count, failed_count, active_count in rows:
+            campaign = await db.get(Campaign, campaign_id)
+            if campaign is None or not target_count:
+                continue
+            if retained_count + failed_count == target_count:
+                campaign.status = "completed" if retained_count else "failed"
+            elif active_count:
                 campaign.status = "active"
 
     async def _account_for_list(self, db: AsyncSession, list_id: str) -> ListAccount | None:
