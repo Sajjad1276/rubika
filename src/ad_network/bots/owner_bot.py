@@ -49,6 +49,10 @@ def list_code(kind, threshold):
     return f"V-{threshold}"
 
 
+def back_row(target="dashboard"):
+    return ((f"flow:back:{target}", "🔙 بازگشت"),)
+
+
 async def build_owner_bot(settings: Settings):
     from maxrubika import Bot
 
@@ -62,9 +66,10 @@ async def build_owner_bot(settings: Settings):
         user = await roles.get_or_create_user(rubika_user_id=user_id)
         return user_id, user if roles.has(user, UserRole.OWNER, UserRole.SUPERVISOR) else None
 
-    async def audit(db, actor, action, entity_type, entity_id, meta=None):
+    async def audit(db, actor, action, entity_type, entity_id, meta=None, **kwargs):
+        metadata = meta if meta is not None else kwargs.get("after", {})
         db.add(AuditLog(actor_id=actor, action=action, entity_type=entity_type, entity_id=entity_id,
-                        metadata_json=json.dumps(meta or {}, ensure_ascii=False)))
+                        metadata_json=json.dumps(metadata or {}, ensure_ascii=False)))
 
     async def dashboard(event, db):
         lists = await db.scalar(select(func.count(ListNetwork.id)).where(ListNetwork.active.is_(True)))
@@ -203,14 +208,37 @@ async def build_owner_bot(settings: Settings):
         await db.commit(); await reply(event,f"📈 PERFORMANCE\n━━━━━━━━━━━━━━━━━━━━\nنرخ تکمیل تبلیغات: {completion:.1f}%\nنرخ موفقیت Targets: {success:.1f}%\nنرخ تخلف: {rate:.1f}%\nکانال فعال: {channels or 0}\nTarget کل: {total or 0}",inline_keypad=kb((('performance:lists','🗂 Lists'),('performance:channels','📺 Channels')),(('performance:campaigns','📢 Campaigns'),('performance:finance','💰 مالی')),(('home','🏠 خانه'),)))
 
     async def section(event, db, name):
-        titles={'reports':'📋 REPORT CENTER','tasks':'🧩 TASK CENTER','security':'🔐 SECURITY CENTER','notifications':'🔔 NOTIFICATION CENTER','settings':'⚙️ OPEX SETTINGS','emergency':'🚨 EMERGENCY CENTER'}
-        rows={'reports':(('report:daily','📊 روزانه'),('report:weekly','📊 هفتگی'),('report:monthly','📊 ماهانه'),('report:finance','💰 مالی'),('report:channels','📺 کانال‌ها'),('report:lists','🗂 لیست‌ها'),('report:campaigns','📢 تبلیغات'),('report:violations','⚠️ تخلفات')),
+        titles={'reports':'📋 مرکز گزارش‌ها','tasks':'🧩 مرکز وظایف','security':'🔐 امنیت و ثبت رویداد','notifications':'🔔 مرکز اعلان‌ها','settings':'⚙️ تنظیمات اوپکس','emergency':'🚨 عملیات اضطراری'}
+        rows={'reports':(('report:daily','📊 گزارش روزانه'),('report:weekly','📊 گزارش هفتگی'),('report:monthly','📊 گزارش ماهانه'),('report:finance','💰 گزارش مالی'),('report:channels','📺 گزارش کانال‌ها'),('report:lists','🗂 گزارش لیست‌ها'),('report:campaigns','📢 گزارش تبلیغات'),('report:violations','⚠️ گزارش تخلفات')),
               'tasks':(('tasks:pending','🆕 در انتظار'),('tasks:urgent','🔥 فوری'),('tasks:active','🔄 فعال'),('tasks:done','✅ تکمیل‌شده')),
-              'security':(('security:audit','🧾 Audit Log'),('security:people','👤 دسترسی‌ها'),('security:critical','🚨 رخدادهای حساس'),('security:rules','🔒 تنظیمات امنیتی')),
+              'security':(('security:audit','🧾 ثبت رویدادها'),('security:people','👤 دسترسی‌ها'),('security:critical','🚨 رخدادهای حساس'),('security:rules','🔒 تنظیمات امنیتی')),
               'notifications':(('notifications:critical','🚨 بحرانی'),('notifications:warnings','⚠️ هشدارها'),('notifications:info','ℹ️ اطلاعات'),('notifications:readall','✔️ خواندن همه')),
-              'settings':(('settings:lists','🗂 تنظیمات List'),('settings:ads','📢 تبلیغات'),('settings:violations','⚠️ قوانین تخلف'),('settings:finance','💰 مالی'),('settings:automation','🧠 Automation'),('settings:system','🛠 System')),
-              'emergency':(('emergency:ads','🛑 توقف تبلیغات'),('emergency:rotation','🛑 توقف Rotation'),('emergency:lists','🛑 توقف همه Listها'),('emergency:workers','🛑 توقف Worker'),('emergency:reconnect','🔄 اتصال مجدد اکانت‌ها'),('emergency:resume','▶️ ادامه عملیات'))}[name]
-        await db.commit(); await reply(event,titles[name]+"\n━━━━━━━━━━━━━━━━━━━━\nکنترل OPEX از همین‌جا انجام می‌شود.",inline_keypad=kb(*[tuple(rows[i:i+2]) for i in range(0,len(rows),2)],(('home','🏠 خانه'),)))
+              'settings':(('settings:lists','🗂 تنظیمات لیست‌ها'),('settings:ads','📢 تبلیغات'),('settings:violations','⚠️ قوانین تخلف'),('settings:finance','💰 مالی'),('settings:automation','🧠 خودکارسازی'),('settings:system','🛠 سامانه')),
+              'emergency':(('emergency:ads','🛑 توقف تبلیغات'),('emergency:rotation','🛑 توقف چرخش'),('emergency:lists','🛑 توقف همه لیست‌ها'),('emergency:workers','🛑 توقف کارگرها'),('emergency:reconnect','🔄 اتصال مجدد اکانت‌ها'),('emergency:resume','▶️ ادامه عملیات'))}[name]
+        await db.commit(); await reply(event,titles[name]+"\n━━━━━━━━━━━━━━━━━━━━\nکنترل اوپکس از همین‌جا انجام می‌شود.",inline_keypad=kb(*[tuple(rows[i:i+2]) for i in range(0,len(rows),2)],back_row(name)))
+
+    async def settings_detail(event, db, key):
+        panels = {
+            "lists": ("🗂 تنظیمات لیست‌ها", "مدیریت وضعیت، ظرفیت و شرایط لیست‌ها."),
+            "ads": ("📢 تنظیمات تبلیغات", "مدیریت رفتار کمپین‌ها، زمان‌بندی و اجرای تبلیغات."),
+            "violations": ("⚠️ قوانین تخلف", "مدیریت شدت تخلف، محدودیت‌ها و رسیدگی به موارد پرخطر."),
+            "finance": ("💰 تنظیمات مالی", "مدیریت پرداخت‌ها، تعرفه‌ها و کنترل مالی."),
+            "automation": ("🧠 خودکارسازی", "مدیریت اجرای خودکار همگام‌سازی، بررسی‌ها و عملیات دوره‌ای."),
+            "system": ("🛠 تنظیمات سامانه", "وضعیت سامانه، اکانت‌ها و پارامترهای اجرایی."),
+        }
+        title, description = panels.get(key, ("⚙️ تنظیمات", "بخش تنظیمات پیدا نشد."))
+        buttons = {
+            "lists": (("settings:lists:status", "📊 وضعیت لیست‌ها"), ("settings:lists:capacity", "📦 ظرفیت لیست‌ها")),
+            "ads": (("settings:ads:status", "📊 وضعیت تبلیغات"), ("settings:ads:execution", "⚙️ اجرای تبلیغات")),
+            "violations": (("settings:violations:rules", "📚 قوانین"), ("settings:violations:limits", "🚦 محدودیت‌ها")),
+            "finance": (("settings:finance:pricing", "💵 تعرفه‌ها"), ("settings:finance:payments", "💳 پرداخت‌ها")),
+            "automation": (("settings:automation:sync", "🔄 همگام‌سازی"), ("settings:automation:checks", "🔎 بررسی خودکار")),
+            "system": (("settings:system:health", "❤️ سلامت سامانه"), ("settings:system:accounts", "👤 اکانت‌ها")),
+        }.get(key, ())
+        rows = [tuple(buttons[i:i + 2]) for i in range(0, len(buttons), 2)]
+        rows.append(back_row("settings"))
+        await db.commit()
+        await reply(event, f"{title}\n━━━━━━━━━━━━━━━━━━━━\n{description}\n\nاین بخش فعال است و گزینه‌های مدیریتی از همین‌جا در دسترس هستند.", inline_keypad=kb(*rows))
 
     async def action(event, a):
         async with SessionFactory() as db:
@@ -221,37 +249,40 @@ async def build_owner_bot(settings: Settings):
             if a=='lists':await list_menu(event,db);return
             if a=='lists:all':await list_index(event,db);return
             if a.startswith('lists:') and a.split(':')[1] in FAMILIES:await list_index(event,db,a.split(':')[1]);return
-            if a=='list:create':_STATES[uid]=('list_type',{});await db.commit();await reply(event,'➕ ایجاد List\nنوع را ارسال کنید: PULSE / BOOST / REACH');return
+            if a=='list:create':_STATES[uid]=('list_type',{});await db.commit();await reply(event,'➕ ایجاد لیست\nنوع را ارسال کنید: PULSE / BOOST / REACH');return
             if a.startswith('list:') and a.count(':')==1:await list_detail(event,db,a.split(':')[1]);return
             if a.startswith('list:channels:'):await channels(event,db,list_id=a.rsplit(':',1)[1]);return
             if a.startswith('list:campaigns:'):await campaigns(event,db,list_id=a.rsplit(':',1)[1]);return
             if a.startswith('list:violations:'):await violations(event,db);return
             if a.startswith('list:performance:'):await performance(event,db);return
             if a.startswith('list:pause:'):
-                x=await db.get(ListNetwork,a.rsplit(':',1)[1]);x.active=not x.active;x.status='active' if x.active else 'paused';await audit(db,user.id,'list_toggled','list',x.id,{'active':x.active});await db.commit();await reply(event,'✅ وضعیت List تغییر کرد.',inline_keypad=kb((('lists','↩️ بازگشت'),)));return
-            if a.startswith('list:archive:'):_STATES[uid]=('confirm',{'action':'archive_list','id':a.rsplit(':',1)[1],'phrase':'ARCHIVE LIST'});await db.commit();await reply(event,'⚠️ آرشیو List\nعبارت تأیید: ARCHIVE LIST');return
+                x=await db.get(ListNetwork,a.rsplit(':',1)[1]);x.active=not x.active;x.status='active' if x.active else 'paused';await audit(db,user.id,'list_toggled','list',x.id,{'active':x.active});await db.commit();await reply(event,'✅ وضعیت لیست تغییر کرد.',inline_keypad=kb((('lists','↩️ بازگشت'),)));return
+            if a.startswith('list:archive:'):_STATES[uid]=('confirm',{'action':'archive_list','id':a.rsplit(':',1)[1],'phrase':'آرشیو لیست'});await db.commit();await reply(event,'⚠️ آرشیو لیست\nعبارت تأیید: آرشیو لیست');return
             if a=='channels':await channels(event,db);return
             if a.startswith('channels:'):await channels(event,db,{'active':'active','pending':'pending','warning':'suspended','removed':'removed'}.get(a.split(':')[1]));return
             if a.startswith('channel:') and a.count(':')==1:await channel_detail(event,db,a.split(':')[1]);return
             if a.startswith('channel:violations:'):await violations(event,db,a.rsplit(':',1)[1]);return
             if a.startswith('channel:eligibility:'):await channel_detail(event,db,a.rsplit(':',1)[1]);return
-            if a.startswith('channel:suspend:') or a.startswith('channel:remove:'):_STATES[uid]=('confirm',{'action':'suspend_channel' if 'suspend' in a else 'remove_channel','id':a.rsplit(':',1)[1],'phrase':'CONFIRM CHANNEL'});await db.commit();await reply(event,'⚠️ عملیات حساس\nعبارت تأیید: CONFIRM CHANNEL');return
+            if a.startswith('channel:suspend:') or a.startswith('channel:remove:'):_STATES[uid]=('confirm',{'action':'suspend_channel' if 'suspend' in a else 'remove_channel','id':a.rsplit(':',1)[1],'phrase':'تأیید عملیات کانال'});await db.commit();await reply(event,'⚠️ عملیات حساس\nعبارت تأیید: تأیید عملیات کانال');return
             if a=='campaigns':await campaigns(event,db);return
             if a.startswith('campaigns:'):await campaigns(event,db,{'active':'active','queued':'scheduled','completed':'completed','failed':'failed'}.get(a.split(':')[1]));return
             if a.startswith('campaign:') and a.count(':')==1:await campaign_detail(event,db,a.split(':')[1]);return
             if a.startswith('campaign:pause:'):
-                c=await db.get(Campaign,a.rsplit(':',1)[1]);c.status='paused' if c.status in {'active','scheduled'} else 'active';await audit(db,user.id,'campaign_toggled','campaign',c.id,{'status':c.status});await db.commit();await reply(event,'✅ وضعیت Campaign تغییر کرد.',inline_keypad=kb((('campaigns','↩️ بازگشت'),)));return
-            if a.startswith('campaign:cancel:'):_STATES[uid]=('confirm',{'action':'cancel_campaign','id':a.rsplit(':',1)[1],'phrase':'CANCEL CAMPAIGN'});await db.commit();await reply(event,'⚠️ لغو Campaign\nعبارت تأیید: CANCEL CAMPAIGN');return
+                c=await db.get(Campaign,a.rsplit(':',1)[1]);c.status='paused' if c.status in {'active','scheduled'} else 'active';await audit(db,user.id,'campaign_toggled','campaign',c.id,{'status':c.status});await db.commit();await reply(event,'✅ وضعیت کمپین تغییر کرد.',inline_keypad=kb((('campaigns','↩️ بازگشت'),)));return
+            if a.startswith('campaign:cancel:'):_STATES[uid]=('confirm',{'action':'cancel_campaign','id':a.rsplit(':',1)[1],'phrase':'لغو کمپین'});await db.commit();await reply(event,'⚠️ لغو کمپین\nعبارت تأیید: لغو کمپین');return
             if a=='orders':await orders(event,db);return
             if a.startswith('orders:'):await orders(event,db,{'awaiting_payment':'awaiting_payment','paid':'paid','running':'running','completed':'completed'}.get(a.split(':')[1]));return
             if a.startswith('order:') and a.count(':')==1:await order_detail(event,db,a.split(':')[1]);return
-            if a.startswith('order:cancel:'):_STATES[uid]=('confirm',{'action':'cancel_order','id':a.rsplit(':',1)[1],'phrase':'CANCEL ORDER'});await db.commit();await reply(event,'⚠️ لغو Order\nعبارت تأیید: CANCEL ORDER');return
+            if a.startswith('order:cancel:'):_STATES[uid]=('confirm',{'action':'cancel_order','id':a.rsplit(':',1)[1],'phrase':'لغو سفارش'});await db.commit();await reply(event,'⚠️ لغو سفارش\nعبارت تأیید: لغو سفارش');return
             if a=='finance' or a.startswith('finance:'):await finance(event,db);return
             if a=='violations' or a.startswith('violations:'):await violations(event,db);return
             if a=='performance' or a.startswith('performance:'):await performance(event,db);return
             if a in {'reports','tasks','security','notifications','settings','emergency'}:await section(event,db,a);return
-            if a.startswith(('report:','tasks:','security:','notifications:','settings:')):await section(event,db,a.split(':')[0]);return
-            if a.startswith('emergency:'):_STATES[uid]=('confirm',{'action':a,'phrase':'STOP OPEX' if a in {'emergency:workers','emergency:lists'} else 'CONFIRM EMERGENCY'});await db.commit();await reply(event,'🚨 عملیات اضطراری\nعبارت تأیید: '+_STATES[uid][1]['phrase']);return
+            if a.startswith('settings:'):
+                parts=a.split(':')
+                if len(parts)>=2:await settings_detail(event,db,parts[1]);return
+            if a.startswith(('report:','tasks:','security:','notifications:')):await section(event,db,a.split(':')[0]);return
+            if a.startswith('emergency:'):_STATES[uid]=('confirm',{'action':a,'phrase':'توقف کامل اوپکس' if a in {'emergency:workers','emergency:lists'} else 'تأیید عملیات اضطراری'});await db.commit();await reply(event,'🚨 عملیات اضطراری\nعبارت تأیید: '+_STATES[uid][1]['phrase']);return
             await db.commit()
 
     @bot.on_callback()
@@ -282,7 +313,7 @@ async def build_owner_bot(settings: Settings):
                     if family not in FAMILIES:raise ValueError('نوع باید PULSE، BOOST یا REACH باشد')
                     data['type']=family;_STATES[uid]=('list_threshold',data);await db.commit();await reply(event,'حداقل مقدار را ارسال کنید: '+', '.join(map(str,FAMILIES[family][2])));return
                 if kind=='list_threshold':
-                    data['threshold']=int(text.replace('K','000').replace(',',''));_STATES[uid]=('list_name',data);await db.commit();await reply(event,'نام نمایشی List را ارسال کنید.');return
+                    data['threshold']=int(text.replace('K','000').replace(',',''));_STATES[uid]=('list_name',data);await db.commit();await reply(event,'نام نمایشی لیست را ارسال کنید.');return
                 if kind=='list_name':
                     if not text:raise ValueError('نام خالی است')
                     data['name']=text;_STATES[uid]=('list_capacity',data);await db.commit();await reply(event,'حداکثر ظرفیت کانال را ارسال کنید.');return
@@ -290,20 +321,22 @@ async def build_owner_bot(settings: Settings):
                     cap=int(text);code=list_code(data['type'],data['threshold'])
                     if cap<1:raise ValueError('ظرفیت نامعتبر است')
                     if await db.scalar(select(ListNetwork).where(ListNetwork.code==code)):raise ValueError('کد تکراری است: '+code)
-                    data.update(capacity=cap,code=code);_STATES[uid]=('list_confirm',data);await db.commit();await reply(event,f"━━━━━━━━━━━━━━━━━━━━\n{data['name']}\nCode: {code}\nType: {data['type'].upper()}\nThreshold: {data['threshold']}\nRetention: {FAMILIES[data['type']][1]}h\nCapacity: {cap}\n━━━━━━━━━━━━━━━━━━━━\nبرای ثبت CREATE را ارسال کنید.");return
+                    data.update(capacity=cap,code=code);_STATES[uid]=('list_confirm',data);await db.commit();await reply(event,f"━━━━━━━━━━━━━━━━━━━━\n{data['name']}\nکد: {code}\nنوع: {data['type'].upper()}\nحداقل مقدار: {data['threshold']}\nتعهد: {FAMILIES[data['type']][1]} ساعت\nظرفیت: {cap}\n━━━━━━━━━━━━━━━━━━━━\nبرای ثبت، CREATE را ارسال کنید.");return
                 if kind=='list_confirm':
                     if text.upper()!='CREATE':raise ValueError('برای ثبت نهایی CREATE را ارسال کنید')
                     family=data['type'];threshold=data['threshold'];item=ListNetwork(code=data['code'],name=data['name'],list_type=family,min_stat=threshold if family!='reach' else 0,required_views=threshold if family=='reach' else 0,retention_hours=FAMILIES[family][1],max_channels=data['capacity'],min_channels=1,status='active',active=True)
-                    db.add(item);await db.flush();await audit(db,user.id,'list_created','list',item.id,{'code':item.code,'type':family,'threshold':threshold});await db.commit();_STATES.pop(uid,None);await reply(event,'✅ List ساخته شد: '+item.code,keypad=owner_keyboard());return
+                    db.add(item);await db.flush();await audit(db,user.id,'list_created','list',item.id,{'code':item.code,'type':family,'threshold':threshold});await db.commit();_STATES.pop(uid,None);await reply(event,'✅ لیست ساخته شد: '+item.code,keypad=owner_keyboard());return
                 if kind=='confirm':
-                    if text.upper()!=data['phrase']:await db.commit();await reply(event,'❌ عبارت تأیید اشتباه است.');return
-                    target=data['id'];operation=data['action']
+                    if text!=data['phrase']:await db.commit();await reply(event,'❌ عبارت تأیید اشتباه است.');return
+                    target=data.get('id');operation=data['action']
                     if operation=='archive_list':item=await db.get(ListNetwork,target);item.active=False;item.status='archived'
                     elif operation=='suspend_channel':item=await db.get(Channel,target);item.status=ChannelStatus.SUSPENDED
                     elif operation=='remove_channel':item=await db.get(Channel,target);item.status=ChannelStatus.REMOVED
                     elif operation=='cancel_campaign':item=await db.get(Campaign,target);item.status='cancelled'
                     elif operation=='cancel_order':item=await db.get(AdOrder,target);item.status='cancelled'
-                    await audit(db,user.id,'sensitive_action','system' if operation.startswith('emergency:') else operation,target,{'operation':operation});await db.commit();_STATES.pop(uid,None);await reply(event,'✅ عملیات ثبت شد.',keypad=owner_keyboard());return
+                    elif operation=='toggle_list':item=await db.get(ListNetwork,target);item.active=not item.active;item.status='active' if item.active else 'paused'
+                    elif operation=='toggle_campaign':item=await db.get(Campaign,target);item.status='active' if item.status not in {'active','scheduled'} else 'paused'
+                    await audit(db,user.id,'sensitive_action',operation,target,{'operation':operation});await db.commit();_STATES.pop(uid,None);await reply(event,'✅ عملیات ثبت شد.',keypad=owner_keyboard());return
             except (ValueError,TypeError) as exc:
                 await db.rollback();await reply(event,'❌ '+str(exc))
 
