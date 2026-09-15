@@ -53,5 +53,5 @@ def test_owner_list_grid_callbacks_match_owner_router_contract():
     assert "lists:6h:5000" in callbacks
     assert "lists:view:50" in callbacks
     assert "lists:view:600" in callbacks
-    assert callbacks[-1] == "lists"
+    assert callbacks[-1] == "dashboard"
     assert "home" not in callbacks
