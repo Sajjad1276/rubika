@@ -1,6 +1,7 @@
 from .admin_bot import build_admin_bot as _build_admin_bot
 from .owner_localized import build_owner_bot as _build_owner_bot
 from .owner_inline import handle as handle_owner_inline_action
+from .owner_list_grid import handle_owner_list_grid
 from .user_bot import build_user_bot
 from .common import button_id, reply, resolve_user, update_type
 from ..core.db import SessionFactory
@@ -32,7 +33,10 @@ def _hide_unsupported_worker_control() -> None:
                 if not isinstance(row, dict) or not isinstance(row.get("buttons"), list):
                     rows.append(row)
                     continue
-                buttons = [b for b in row["buttons"] if not (isinstance(b, dict) and b.get("id") == "emergency:workers")]
+                buttons = [
+                    b for b in row["buttons"]
+                    if not (isinstance(b, dict) and b.get("id") == "emergency:workers")
+                ]
                 if buttons:
                     row = dict(row)
                     row["buttons"] = buttons
@@ -89,6 +93,8 @@ async def build_owner_bot(settings):
                     parts = value.split(":") if value else []
                     if len(parts) == 3 and parts[0] == "settings":
                         await _settings_option(event, bot_instance, settings, parts[1], parts[2])
+                        return
+                    if await handle_owner_list_grid(event, bot_instance, settings, value):
                         return
                     if await handle_owner_inline_action(event, value):
                         return
