@@ -224,7 +224,9 @@ async def build_owner_bot(settings: Settings):
             _,user=await auth(event,db)
             if not user:await db.rollback();await reply(event,'⛔ دسترسی ندارید.');return
             if a in {'home','dashboard','refresh'}:_STATES.pop(uid,None);await dashboard(event,db);return
-            if a=='lists':await list_menu(event,db);return
+            if a=='lists':
+                from .owner_list_grid import list_management_keyboard
+                await reply(event,'🗂 مدیریت لیست‌ها\n━━━━━━━━━━━━━━━━━━━━\nنوع لیست را انتخاب کنید:',inline_keypad=list_management_keyboard());return
             if a=='lists:all':await list_index(event,db);return
             if a.startswith('lists:') and a.split(':')[1] in FAMILIES:await list_index(event,db,a.split(':')[1]);return
             if a=='list:create':_STATES[uid]=('list_type',{});await db.commit();await reply(event,'➕ ایجاد لیست\nنوع را ارسال کنید: PULSE / BOOST / REACH');return
