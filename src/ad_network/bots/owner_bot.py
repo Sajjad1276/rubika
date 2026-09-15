@@ -7,7 +7,7 @@ from ..core.campaigns import Campaign, CampaignTarget
 from ..core.commerce import AdOrder, EarningsEntry, Payment, PriceRule
 from ..core.config import Settings
 from ..core.db import SessionFactory
-from ..core.models import AuditLog, Channel, ChannelStatus, ListAccount, ListNetwork, User, UserRole, Violation
+from ..core.models import AuditLog, Channel, ChannelStatus, ListAccount, ListNetwork, UserRole, Violation
 from ..core.roles import RoleService
 from .common import button_id, inline_keyboard, is_duplicate_update, quick_keyboard, reply, resolve_user, update_text
 
@@ -150,12 +150,9 @@ async def build_owner_bot(settings: Settings):
             await db.commit(); await reply(event, "❌ کانال پیدا نشد."); return
         l = await db.get(ListNetwork, c.list_id) if c.list_id else None
         ads = await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.channel_id == channel_id))
-        if l and l.list_type == "reach":
-            eligible = c.views_24h >= l.required_views
-        elif l and l.list_type == "boost":
-            eligible = (c.member_count or 0) >= l.min_stat
-        else:
-            eligible = bool(l and c.views_24h >= l.min_stat)
+        if l and l.list_type == "reach": eligible = c.views_24h >= l.required_views
+        elif l and l.list_type == "boost": eligible = (c.member_count or 0) >= l.min_stat
+        else: eligible = bool(l and c.views_24h >= l.min_stat)
         await db.commit()
         await reply(event, f"📺 CHANNEL\n━━━━━━━━━━━━━━━━━━━━\nنام: {c.title or '-'}\nشناسه: {c.rubika_guid}\nUsername: @{c.username or '-'}\n"
                     f"List: {l.name if l else '-'}\nاعضا: {c.member_count or 0}\nView24h: {c.views_24h}\nوضعیت: {c.status.value}\n"
@@ -165,17 +162,12 @@ async def build_owner_bot(settings: Settings):
 
     async def campaigns(event, db, status=None, list_id=None):
         query = select(Campaign).order_by(Campaign.created_at.desc()).limit(40)
-        if status:
-            query = query.where(Campaign.status == status)
-        if list_id:
-            query = query.join(CampaignTarget, CampaignTarget.campaign_id == Campaign.id).where(CampaignTarget.list_id == list_id)
+        if status: query = query.where(Campaign.status == status)
+        if list_id: query = query.join(CampaignTarget, CampaignTarget.campaign_id == Campaign.id).where(CampaignTarget.list_id == list_id)
         rows = (await db.scalars(query)).unique().all(); lines=[]; buttons=[]
         for c in rows:
-            total=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==c.id))
-            done=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==c.id,CampaignTarget.status=='retained'))
-            failed=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==c.id,CampaignTarget.status=='failed'))
-            lines.append(f"📢 {c.title} | {c.status} | {done or 0}/{total or 0} | failed {failed or 0}")
-            buttons.append((f"campaign:{c.id}",c.title[:22]))
+            total=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==c.id)); done=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==c.id,CampaignTarget.status=='retained')); failed=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==c.id,CampaignTarget.status=='failed'))
+            lines.append(f"📢 {c.title} | {c.status} | {done or 0}/{total or 0} | failed {failed or 0}"); buttons.append((f"campaign:{c.id}",c.title[:22]))
         await db.commit(); await reply(event,"📢 CAMPAIGNS\n━━━━━━━━━━━━━━━━━━━━\n"+("\n".join(lines) or "کمپینی وجود ندارد."),inline_keypad=kb((('campaigns:active','🟢 فعال'),('campaigns:queued','🕐 صف')),(('campaigns:completed','✅ تکمیل'),('campaigns:failed','❌ ناموفق')),*[tuple(buttons[i:i+2]) for i in range(0,len(buttons),2)],(('home','🏠 خانه'),)))
 
     async def campaign_detail(event, db, campaign_id):
