@@ -8,7 +8,7 @@ from .bots import build_admin_bot, build_owner_bot, build_user_bot
 from .core.account_runtime import ListAccountRuntime
 from .core.config import get_settings
 from .core.list_accounts import ListAccountResolver
-from .core.network_worker import NetworkWorker
+from .infrastructure.network_worker import NetworkWorker
 from .infrastructure.runtime import ApplicationRuntime
 
 logger = logging.getLogger(__name__)
