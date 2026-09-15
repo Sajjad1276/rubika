@@ -7,6 +7,16 @@ from ..core.roles import RoleService
 from ..core.models import UserRole
 
 
+class _CallbackProxy:
+    def __init__(self, event, callback_id: str):
+        self._event = event
+        self.button_id = callback_id
+        self.callback_button_id = callback_id
+
+    def __getattr__(self, name):
+        return getattr(self._event, name)
+
+
 async def build_admin_bot(settings, account_resolver=None, account_runtime=None):
     bot = await _build_admin_bot(settings, account_resolver, account_runtime)
 
@@ -53,10 +63,10 @@ async def build_owner_bot(settings):
                         await _settings_option(event, bot_instance, settings, parts[1], parts[2])
                         return
                     if value == "back":
-                        await _original(bot_instance, event)
+                        await _original(bot_instance, _CallbackProxy(event, "dashboard"))
                         return
                     if len(parts) == 3 and parts[0] == "flow" and parts[1] == "back":
-                        await _original(bot_instance, event)
+                        await _original(bot_instance, _CallbackProxy(event, parts[2]))
                         return
                     await _original(bot_instance, event)
 
