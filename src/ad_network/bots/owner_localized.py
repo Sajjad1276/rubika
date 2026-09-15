@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import owner_bot as legacy
-from .common import button_id, inline_keyboard, quick_keyboard, reply, resolve_user
+from .common import button_id, inline_keyboard, quick_keyboard, resolve_user
 from ..core.db import SessionFactory
 from ..core.models import Channel, ChannelStatus, ListNetwork, UserRole, Violation
 from ..core.roles import RoleService
@@ -136,58 +136,6 @@ async def localized_reply(event: Any, text: str, *, inline_keypad: Any = None, k
 
 legacy.reply = localized_reply
 legacy.owner_keyboard = localized_owner_keyboard
-
-
-_SETTINGS_PANELS = {
-    "lists": {
-        "title": "🗂 تنظیمات لیست‌ها",
-        "description": "وضعیت، ظرفیت و شرایط فعالیت لیست‌ها.",
-        "options": {
-            "status": "📊 وضعیت لیست‌ها",
-            "capacity": "📦 ظرفیت لیست‌ها",
-        },
-    },
-    "ads": {
-        "title": "📢 تنظیمات تبلیغات",
-        "description": "وضعیت اجرای تبلیغات و کمپین‌ها.",
-        "options": {
-            "status": "📊 وضعیت تبلیغات",
-            "execution": "⚙️ اجرای تبلیغات",
-        },
-    },
-    "violations": {
-        "title": "⚠️ قوانین تخلف",
-        "description": "کنترل تخلف، محدودیت‌ها و موارد پرخطر.",
-        "options": {
-            "rules": "📚 قوانین",
-            "limits": "🚦 محدودیت‌ها",
-        },
-    },
-    "finance": {
-        "title": "💰 تنظیمات مالی",
-        "description": "کنترل پرداخت، تعرفه و وضعیت مالی.",
-        "options": {
-            "pricing": "💵 تعرفه‌ها",
-            "payments": "💳 پرداخت‌ها",
-        },
-    },
-    "automation": {
-        "title": "🧠 خودکارسازی",
-        "description": "کنترل عملیات خودکار و بررسی‌های دوره‌ای.",
-        "options": {
-            "sync": "🔄 همگام‌سازی",
-            "checks": "🔎 بررسی خودکار",
-        },
-    },
-    "system": {
-        "title": "🛠 تنظیمات سامانه",
-        "description": "سلامت سامانه و وضعیت اکانت‌ها.",
-        "options": {
-            "health": "❤️ سلامت سامانه",
-            "accounts": "👤 اکانت‌ها",
-        },
-    },
-}
 
 
 async def _settings_option(event: Any, bot: Any, settings: Any, section: str, option: str) -> None:
