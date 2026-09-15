@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..adapters.rubika import RubikaGateway
 from .campaigns import Campaign, CampaignTarget
-from .models import Channel
+from .models import Channel, ChannelStatus
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +58,13 @@ class PublicationService:
         result = await self.db.scalars(
             select(CampaignTarget)
             .join(Campaign, Campaign.id == CampaignTarget.campaign_id)
+            .join(Channel, Channel.id == CampaignTarget.channel_id)
             .where(
                 Campaign.status.in_(["active", "scheduled"]),
                 CampaignTarget.status == "planned",
                 CampaignTarget.planned_at.is_not(None),
                 CampaignTarget.planned_at <= now,
+                Channel.status == ChannelStatus.ACTIVE,
             )
             .order_by(CampaignTarget.planned_at)
             .limit(limit)
@@ -137,7 +139,7 @@ class RotationExecutor:
         except ValueError:
             return False
         channel = await self.db.get(Channel, target.channel_id)
-        if channel is None:
+        if channel is None or channel.status != ChannelStatus.ACTIVE:
             await service.mark_failed(target)
             return False
         try:
