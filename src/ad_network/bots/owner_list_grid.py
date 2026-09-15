@@ -26,8 +26,8 @@ async def _authorized(bot: Any, event: Any, settings: Any, db: Any) -> bool:
     return roles.has(user, UserRole.OWNER, UserRole.SUPERVISOR)
 
 
-def _back() -> tuple[tuple[str, str], ...]:
-    return (("lists", "🔙 بازگشت"),)
+def _back(target: str) -> tuple[tuple[str, str], ...]:
+    return ((target, "🔙 بازگشت"),)
 
 
 def _header(text: str, callback: str) -> tuple[tuple[str, str], ...]:
@@ -45,7 +45,7 @@ def list_management_keyboard() -> dict[str, Any]:
             for threshold in thresholds
         ]
         rows.extend(tuple(buttons[i : i + 2]) for i in range(0, len(buttons), 2))
-    rows.append(_back())
+    rows.append(_back("dashboard"))
     return inline_keyboard(*rows)
 
 
@@ -127,7 +127,7 @@ async def handle_owner_list_grid(event: Any, bot: Any, settings: Any, value: str
             + ("\n".join(lines) or "لیستی برای این ظرفیت وجود ندارد."),
             inline_keypad=inline_keyboard(
                 *[tuple(buttons[i : i + 2]) for i in range(0, len(buttons), 2)],
-                _back(),
+                _back("lists"),
             ),
         )
     return True
