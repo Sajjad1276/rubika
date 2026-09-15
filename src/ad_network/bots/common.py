@@ -27,8 +27,8 @@ def update_key(event: Any) -> str | None:
     update_id = first_attr(event, "update_id", "id", default=None)
     if update_id is not None:
         return f"update:{update_id}"
-    message_id = first_attr(event, "message_id", "message_id_string", "msg_id", default=None)
-    author_id = first_attr(event, "user_guid", "author_id", "sender_id", "author_guid", default=None)
+    message_id = first_attr(event, "message_id", "msg_id", "message_id_string", default=None)
+    author_id = first_attr(event, "author_id", "user_guid", "sender_id", "author_guid", default=None)
     if message_id is not None:
         return f"message:{author_id or '-'}:{message_id}"
     button = first_attr(event, "button_id", "callback_button_id", default=None)
@@ -53,7 +53,7 @@ def is_duplicate_update(event: Any) -> bool:
 
 
 def update_user_id(event: Any) -> str | None:
-    user_id = first_attr(event, "user_guid", "author_id", "sender_id", "author_guid", default=None)
+    user_id = first_attr(event, "author_id", "user_guid", "sender_id", "author_guid", default=None)
     if user_id:
         username = first_attr(event, "username", "author_username", "sender_username", default=None)
         if username:
@@ -66,7 +66,6 @@ async def resolve_user(bot: Any, event: Any) -> str | None:
     user_id = update_user_id(event) or first_attr(event, "chat_id", "chat_guid", "object_guid", default=None)
     if not user_id:
         return None
-
     username = first_attr(event, "username", "author_username", "sender_username", default=None)
     if not username and str(user_id).startswith("u0"):
         get_user_info = getattr(bot, "get_user_info", None)
@@ -80,7 +79,6 @@ async def resolve_user(bot: Any, event: Any) -> str | None:
                     username = first_attr(info, "username", "user_name", default=None)
             except Exception:
                 username = None
-
     if not username:
         chat_id = first_attr(event, "chat_id", "chat_guid", "object_guid", default=user_id)
         try:
@@ -90,10 +88,13 @@ async def resolve_user(bot: Any, event: Any) -> str | None:
             username = first_attr(chat, "username", "user_name", default=None)
         except Exception:
             username = None
-
     if username:
         remember_username(str(user_id), str(username))
     return str(user_id)
+
+
+def update_type(event: Any) -> str:
+    return str(first_attr(event, "update_type", "type", default="") or "")
 
 
 def update_text(event: Any) -> str:
@@ -110,21 +111,22 @@ def _add_back_row(rows: tuple[tuple[tuple[str, str], ...], ...]) -> tuple[tuple[
     return (*rows, (("home", "↩️ بازگشت"),))
 
 
-def _keyboard(rows: tuple[tuple[tuple[str, str], ...], ...]) -> dict[str, Any]:
+def _keyboard(rows: tuple[tuple[tuple[str, str], ...], ...], *, add_back: bool) -> dict[str, Any]:
+    final_rows = _add_back_row(rows) if add_back else rows
     return {
         "rows": [
             {"buttons": [{"id": button, "type": "Simple", "button_text": label} for button, label in row]}
-            for row in rows
+            for row in final_rows
         ]
     }
 
 
 def inline_keyboard(*rows: tuple[tuple[str, str], ...]) -> dict[str, Any]:
-    return _keyboard(_add_back_row(rows))
+    return _keyboard(rows, add_back=True)
 
 
 def quick_keyboard(*rows: tuple[tuple[str, str], ...]) -> dict[str, Any]:
-    return _keyboard(_add_back_row(rows))
+    return _keyboard(rows, add_back=False)
 
 
 async def reply(event: Any, text: str, *, inline_keypad: Any = None, keypad: Any = None) -> Any:
