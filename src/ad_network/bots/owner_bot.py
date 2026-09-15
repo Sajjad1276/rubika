@@ -178,14 +178,14 @@ async def build_owner_bot(settings: Settings):
     async def campaign_detail(event, db, campaign_id):
         c=await db.get(Campaign,campaign_id)
         if not c: await db.commit(); await reply(event,"❌ کمپین پیدا نشد."); return
-        total=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==campaign_id)); published=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==campaign_id,CampaignTarget.published_at.is_not(None))); done=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==campaign_id,CampaignTarget.status=='retained')); failed=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==campaign_id,CampaignTarget.status=='failed'))
+        total=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==campaign_id)); published=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==campaign_id,CampaignTarget.published_at.is_not(None)); done=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==campaign_id,CampaignTarget.status=='retained')); failed=await db.scalar(select(func.count(CampaignTarget.id)).where(CampaignTarget.campaign_id==campaign_id,CampaignTarget.status=='failed'))
         await db.commit(); await reply(event,f"📢 CAMPAIGN\n━━━━━━━━━━━━━━━━━━━━\nعنوان: {c.title}\nشناسه: {c.id}\nوضعیت: {c.status}\nTarget: {total or 0}\nمنتشرشده: {published or 0}\nتکمیل‌شده: {done or 0}\nناموفق: {failed or 0}\nتعهد: {c.retention_hours} ساعت",inline_keypad=kb((('campaign:pause:'+campaign_id,'⏸ توقف/ادامه'),('campaign:cancel:'+campaign_id,'❌ لغو')),(('campaigns','↩️ بازگشت'),)))
 
     async def orders(event, db, status=None):
         query=select(AdOrder).order_by(AdOrder.created_at.desc()).limit(40)
         if status: query=query.where(AdOrder.status==status)
         rows=(await db.scalars(query)).all(); buttons=[(f"order:{o.id}",f"💳 #{o.id[:8]}") for o in rows]
-        await db.commit(); await reply(event,"💳 ORDERS\n━━━━━━━━━━━━━━━━━━━━\n"+('\n'.join(f'#{o.id[:8]} | {o.status.value} | {money(o.total_price)} | {o.channel_count} کانال' for o in rows) or 'سفارشی وجود ندارد.'),inline_keypad=kb((('orders:awaiting_payment','💳 پرداخت‌نشده'),('orders:paid','💰 پرداخت‌شده')),(('orders:running','🔄 اجرا'),('orders:completed','✅ تکمیل')),*[tuple(buttons[i:i+2]) for i in range(0,len(buttons),2)],(('home','🏠 خانه'),)))
+        await db.commit(); await reply(event,"💳 ORDERS\n━━━━━━━━━━━━━━━━━━━━\n"+( '\n'.join(f'#{o.id[:8]} | {o.status.value} | {money(o.total_price)} | {o.channel_count} کانال' for o in rows) or 'سفارشی وجود ندارد.'),inline_keypad=kb((('orders:awaiting_payment','💳 پرداخت‌نشده'),('orders:paid','💰 پرداخت‌شده')),(('orders:running','🔄 اجرا'),('orders:completed','✅ تکمیل')),*[tuple(buttons[i:i+2]) for i in range(0,len(buttons),2)],(('home','🏠 خانه'),)))
 
     async def order_detail(event, db, order_id):
         o=await db.get(AdOrder,order_id); p=await db.scalar(select(Payment).where(Payment.order_id==order_id)); l=await db.get(ListNetwork,o.list_id) if o else None
@@ -215,35 +215,13 @@ async def build_owner_bot(settings: Settings):
               'notifications':(('notifications:critical','🚨 بحرانی'),('notifications:warnings','⚠️ هشدارها'),('notifications:info','ℹ️ اطلاعات'),('notifications:readall','✔️ خواندن همه')),
               'settings':(('settings:lists','🗂 تنظیمات لیست‌ها'),('settings:ads','📢 تبلیغات'),('settings:violations','⚠️ قوانین تخلف'),('settings:finance','💰 مالی'),('settings:automation','🧠 خودکارسازی'),('settings:system','🛠 سامانه')),
               'emergency':(('emergency:ads','🛑 توقف تبلیغات'),('emergency:rotation','🛑 توقف چرخش'),('emergency:lists','🛑 توقف همه لیست‌ها'),('emergency:workers','🛑 توقف کارگرها'),('emergency:reconnect','🔄 اتصال مجدد اکانت‌ها'),('emergency:resume','▶️ ادامه عملیات'))}[name]
-        await db.commit(); await reply(event,titles[name]+"\n━━━━━━━━━━━━━━━━━━━━\nکنترل اوپکس از همین‌جا انجام می‌شود.",inline_keypad=kb(*[tuple(rows[i:i+2]) for i in range(0,len(rows),2)],back_row(name)))
-
-    async def settings_detail(event, db, key):
-        panels = {
-            "lists": ("🗂 تنظیمات لیست‌ها", "مدیریت وضعیت، ظرفیت و شرایط لیست‌ها."),
-            "ads": ("📢 تنظیمات تبلیغات", "مدیریت رفتار کمپین‌ها، زمان‌بندی و اجرای تبلیغات."),
-            "violations": ("⚠️ قوانین تخلف", "مدیریت شدت تخلف، محدودیت‌ها و رسیدگی به موارد پرخطر."),
-            "finance": ("💰 تنظیمات مالی", "مدیریت پرداخت‌ها، تعرفه‌ها و کنترل مالی."),
-            "automation": ("🧠 خودکارسازی", "مدیریت اجرای خودکار همگام‌سازی، بررسی‌ها و عملیات دوره‌ای."),
-            "system": ("🛠 تنظیمات سامانه", "وضعیت سامانه، اکانت‌ها و پارامترهای اجرایی."),
-        }
-        title, description = panels.get(key, ("⚙️ تنظیمات", "بخش تنظیمات پیدا نشد."))
-        buttons = {
-            "lists": (("settings:lists:status", "📊 وضعیت لیست‌ها"), ("settings:lists:capacity", "📦 ظرفیت لیست‌ها")),
-            "ads": (("settings:ads:status", "📊 وضعیت تبلیغات"), ("settings:ads:execution", "⚙️ اجرای تبلیغات")),
-            "violations": (("settings:violations:rules", "📚 قوانین"), ("settings:violations:limits", "🚦 محدودیت‌ها")),
-            "finance": (("settings:finance:pricing", "💵 تعرفه‌ها"), ("settings:finance:payments", "💳 پرداخت‌ها")),
-            "automation": (("settings:automation:sync", "🔄 همگام‌سازی"), ("settings:automation:checks", "🔎 بررسی خودکار")),
-            "system": (("settings:system:health", "❤️ سلامت سامانه"), ("settings:system:accounts", "👤 اکانت‌ها")),
-        }.get(key, ())
-        rows = [tuple(buttons[i:i + 2]) for i in range(0, len(buttons), 2)]
-        rows.append(back_row("settings"))
-        await db.commit()
-        await reply(event, f"{title}\n━━━━━━━━━━━━━━━━━━━━\n{description}\n\nاین بخش فعال است و گزینه‌های مدیریتی از همین‌جا در دسترس هستند.", inline_keypad=kb(*rows))
+        await db.commit(); await reply(event,titles[name]+"\n━━━━━━━━━━━━━━━━━━━━",inline_keypad=kb(*[tuple(rows[i:i+2]) for i in range(0,len(rows),2)],( ('home','🏠 خانه'),)))
 
     async def action(event, a):
+        uid=await resolve_user(bot,event)
+        if not uid:return
         async with SessionFactory() as db:
-            uid,user=await auth(event,db)
-            if not uid:return
+            _,user=await auth(event,db)
             if not user:await db.rollback();await reply(event,'⛔ دسترسی ندارید.');return
             if a in {'home','dashboard','refresh'}:_STATES.pop(uid,None);await dashboard(event,db);return
             if a=='lists':await list_menu(event,db);return
@@ -251,37 +229,32 @@ async def build_owner_bot(settings: Settings):
             if a.startswith('lists:') and a.split(':')[1] in FAMILIES:await list_index(event,db,a.split(':')[1]);return
             if a=='list:create':_STATES[uid]=('list_type',{});await db.commit();await reply(event,'➕ ایجاد لیست\nنوع را ارسال کنید: PULSE / BOOST / REACH');return
             if a.startswith('list:') and a.count(':')==1:await list_detail(event,db,a.split(':')[1]);return
-            if a.startswith('list:channels:'):await channels(event,db,list_id=a.rsplit(':',1)[1]);return
-            if a.startswith('list:campaigns:'):await campaigns(event,db,list_id=a.rsplit(':',1)[1]);return
-            if a.startswith('list:violations:'):await violations(event,db);return
-            if a.startswith('list:performance:'):await performance(event,db);return
-            if a.startswith('list:pause:'):
-                x=await db.get(ListNetwork,a.rsplit(':',1)[1]);x.active=not x.active;x.status='active' if x.active else 'paused';await audit(db,user.id,'list_toggled','list',x.id,{'active':x.active});await db.commit();await reply(event,'✅ وضعیت لیست تغییر کرد.',inline_keypad=kb((('lists','↩️ بازگشت'),)));return
-            if a.startswith('list:archive:'):_STATES[uid]=('confirm',{'action':'archive_list','id':a.rsplit(':',1)[1],'phrase':'آرشیو لیست'});await db.commit();await reply(event,'⚠️ آرشیو لیست\nعبارت تأیید: آرشیو لیست');return
+            if a.startswith('list:channels:'):await channels(event,db,list_id=a.split(':',2)[2]);return
+            if a.startswith('list:campaigns:'):await campaigns(event,db,list_id=a.split(':',2)[2]);return
+            if a.startswith('list:performance:') or a.startswith('list:violations:'):await db.commit();return
+            if a.startswith('list:pause:') or a.startswith('list:archive:'):
+                target=a.split(':',2)[2];phrase='تأیید عملیات لیست';_STATES[uid]=('confirm',{'action':'toggle_list' if a.startswith('list:pause:') else 'archive_list','id':target,'phrase':phrase});await db.commit();await reply(event,f'⚠️ عبارت تأیید: {phrase}');return
             if a=='channels':await channels(event,db);return
-            if a.startswith('channels:'):await channels(event,db,{'active':'active','pending':'pending','warning':'suspended','removed':'removed'}.get(a.split(':')[1]));return
+            if a.startswith('channels:'):await channels(event,db,a.split(':',1)[1]);return
             if a.startswith('channel:') and a.count(':')==1:await channel_detail(event,db,a.split(':')[1]);return
-            if a.startswith('channel:violations:'):await violations(event,db,a.rsplit(':',1)[1]);return
-            if a.startswith('channel:eligibility:'):await channel_detail(event,db,a.rsplit(':',1)[1]);return
-            if a.startswith('channel:suspend:') or a.startswith('channel:remove:'):_STATES[uid]=('confirm',{'action':'suspend_channel' if 'suspend' in a else 'remove_channel','id':a.rsplit(':',1)[1],'phrase':'تأیید عملیات کانال'});await db.commit();await reply(event,'⚠️ عملیات حساس\nعبارت تأیید: تأیید عملیات کانال');return
+            if a.startswith('channel:eligibility:'):await db.commit();await reply(event,'🔎 بررسی شرایط انجام شد.');return
+            if a.startswith('channel:violations:'):await violations(event,db,a.split(':',2)[2]);return
+            if a.startswith('channel:suspend:') or a.startswith('channel:remove:'):
+                target=a.split(':',2)[2];phrase='تأیید عملیات کانال';_STATES[uid]=('confirm',{'action':'suspend_channel' if a.startswith('channel:suspend:') else 'remove_channel','id':target,'phrase':phrase});await db.commit();await reply(event,f'⚠️ عبارت تأیید: {phrase}');return
             if a=='campaigns':await campaigns(event,db);return
-            if a.startswith('campaigns:'):await campaigns(event,db,{'active':'active','queued':'scheduled','completed':'completed','failed':'failed'}.get(a.split(':')[1]));return
+            if a.startswith('campaigns:'):await campaigns(event,db,a.split(':',1)[1]);return
             if a.startswith('campaign:') and a.count(':')==1:await campaign_detail(event,db,a.split(':')[1]);return
-            if a.startswith('campaign:pause:'):
-                c=await db.get(Campaign,a.rsplit(':',1)[1]);c.status='paused' if c.status in {'active','scheduled'} else 'active';await audit(db,user.id,'campaign_toggled','campaign',c.id,{'status':c.status});await db.commit();await reply(event,'✅ وضعیت کمپین تغییر کرد.',inline_keypad=kb((('campaigns','↩️ بازگشت'),)));return
-            if a.startswith('campaign:cancel:'):_STATES[uid]=('confirm',{'action':'cancel_campaign','id':a.rsplit(':',1)[1],'phrase':'لغو کمپین'});await db.commit();await reply(event,'⚠️ لغو کمپین\nعبارت تأیید: لغو کمپین');return
+            if a.startswith('campaign:pause:') or a.startswith('campaign:cancel:'):
+                target=a.split(':',2)[2];phrase='تأیید عملیات کمپین';_STATES[uid]=('confirm',{'action':'toggle_campaign' if a.startswith('campaign:pause:') else 'cancel_campaign','id':target,'phrase':phrase});await db.commit();await reply(event,f'⚠️ عبارت تأیید: {phrase}');return
             if a=='orders':await orders(event,db);return
-            if a.startswith('orders:'):await orders(event,db,{'awaiting_payment':'awaiting_payment','paid':'paid','running':'running','completed':'completed'}.get(a.split(':')[1]));return
+            if a.startswith('orders:'):await orders(event,db,a.split(':',1)[1]);return
             if a.startswith('order:') and a.count(':')==1:await order_detail(event,db,a.split(':')[1]);return
-            if a.startswith('order:cancel:'):_STATES[uid]=('confirm',{'action':'cancel_order','id':a.rsplit(':',1)[1],'phrase':'لغو سفارش'});await db.commit();await reply(event,'⚠️ لغو سفارش\nعبارت تأیید: لغو سفارش');return
-            if a=='finance' or a.startswith('finance:'):await finance(event,db);return
-            if a=='violations' or a.startswith('violations:'):await violations(event,db);return
-            if a=='performance' or a.startswith('performance:'):await performance(event,db);return
+            if a.startswith('order:cancel:'):
+                target=a.split(':',2)[2];phrase='تأیید لغو سفارش';_STATES[uid]=('confirm',{'action':'cancel_order','id':target,'phrase':phrase});await db.commit();await reply(event,f'⚠️ عبارت تأیید: {phrase}');return
+            if a=='finance':await finance(event,db);return
+            if a=='violations':await violations(event,db);return
+            if a=='performance':await performance(event,db);return
             if a in {'reports','tasks','security','notifications','settings','emergency'}:await section(event,db,a);return
-            if a.startswith('settings:'):
-                parts=a.split(':')
-                if len(parts)>=2:await settings_detail(event,db,parts[1]);return
-            if a.startswith(('report:','tasks:','security:','notifications:')):await section(event,db,a.split(':')[0]);return
             if a.startswith('emergency:'):_STATES[uid]=('confirm',{'action':a,'phrase':'توقف کامل اوپکس' if a in {'emergency:workers','emergency:lists'} else 'تأیید عملیات اضطراری'});await db.commit();await reply(event,'🚨 عملیات اضطراری\nعبارت تأیید: '+_STATES[uid][1]['phrase']);return
             await db.commit()
 
@@ -292,15 +265,15 @@ async def build_owner_bot(settings: Settings):
         if value:await action(event,value)
 
     @bot.on_message()
-    async def handle(bot_instance,event):
+    async def on_message(bot_instance,event):
         if is_duplicate_update(event):return
+        text=update_text(event)
         uid=await resolve_user(bot,event)
         if not uid:return
-        text=update_text(event).strip()
         if text in {'/start','منو','menu','↩️ بازگشت'}:_STATES.pop(uid,None);await action(event,'dashboard');return
         state=_STATES.get(uid)
         if not state:
-            labels={'📊 داشبورد':'dashboard','🗂 لیست‌ها':'lists','📺 کانال‌ها':'channels','📢 تبلیغات':'campaigns','💳 سفارش‌ها':'orders','💰 مالی':'finance','⚠️ تخلفات':'violations','📈 عملکرد':'performance','📋 گزارش‌ها':'reports','🧩 وظایف':'tasks','🔐 امنیت':'security','🔔 اعلان‌ها':'notifications','⚙️ تنظیمات':'settings','🚨 عملیات اضطراری':'emergency','🔄 بروزرسانی':'refresh'}
+            labels={'📊 داشبورد':'dashboard','🗂 لیست‌ها':'lists','🗂 مدیریت لیست‌ها':'lists','📺 کانال‌ها':'channels','📢 تبلیغات':'campaigns','📢 تبلیغات و کمپین‌ها':'campaigns','💳 سفارش‌ها':'orders','💰 مالی':'finance','⚠️ تخلفات':'violations','📈 عملکرد':'performance','📋 گزارش‌ها':'reports','🧩 وظایف':'tasks','🔐 امنیت':'security','🔐 امنیت و ثبت رویداد':'security','🔔 اعلان‌ها':'notifications','⚙️ تنظیمات':'settings','🚨 عملیات اضطراری':'emergency','🔄 بروزرسانی':'refresh'}
             if text in labels:await action(event,labels[text])
             return
         kind,data=state
