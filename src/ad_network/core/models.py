@@ -95,7 +95,13 @@ class ListNetwork(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
+    list_type: Mapped[str] = mapped_column(String(16), default="pulse", index=True)
+    min_stat: Mapped[int] = mapped_column(Integer, default=0)
+    required_views: Mapped[int] = mapped_column(Integer, default=0)
+    retention_hours: Mapped[int] = mapped_column(Integer, default=12)
+    max_channels: Mapped[int] = mapped_column(Integer, default=1000)
     min_channels: Mapped[int] = mapped_column(Integer, default=20)
+    status: Mapped[str] = mapped_column(String(24), default="active", index=True)
     active: Mapped[bool] = mapped_column(default=True)
     next_channel_number: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -118,6 +124,7 @@ class Channel(Base):
     username: Mapped[str | None] = mapped_column(String(128))
     title: Mapped[str | None] = mapped_column(String(255))
     member_count: Mapped[int | None] = mapped_column(Integer)
+    views_24h: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[ChannelStatus] = mapped_column(enum_column(ChannelStatus), default=ChannelStatus.PENDING)
     list_id: Mapped[str | None] = mapped_column(ForeignKey("lists.id"), index=True)
     list_code: Mapped[str | None] = mapped_column(String(32), index=True)
@@ -125,6 +132,8 @@ class Channel(Base):
     can_send: Mapped[bool] = mapped_column(Boolean, default=False)
     can_edit: Mapped[bool] = mapped_column(Boolean, default=False)
     can_delete: Mapped[bool] = mapped_column(Boolean, default=False)
+    violation_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_ad_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     verification_notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     list: Mapped[ListNetwork | None] = relationship(back_populates="channels")
@@ -176,7 +185,7 @@ class Violation(Base):
     severity: Mapped[int] = mapped_column(Integer, default=1)
     note: Mapped[str | None] = mapped_column(Text)
     resolved: Mapped[bool] = mapped_column(default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True, server_default=func.now()))
 
 
 class AuditLog(Base):
@@ -187,7 +196,7 @@ class AuditLog(Base):
     entity_type: Mapped[str] = mapped_column(String(64))
     entity_id: Mapped[str] = mapped_column(String(36), index=True)
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True, server_default=func.now()))
 
 
 if "ad_network.core.campaigns" not in sys.modules:
