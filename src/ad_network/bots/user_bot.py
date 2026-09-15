@@ -10,7 +10,7 @@ from ..core.models import AuditLog, Channel, ListNetwork, RegistrationSource, Us
 from ..core.payments import prepare_payment
 from ..core.roles import RoleService
 from ..core.services import RegistrationService, TaskService
-from .common import is_duplicate_update, quick_keyboard, reply, resolve_user, update_text, update_type
+from .common import button_id, is_duplicate_update, quick_keyboard, reply, resolve_user, update_text, update_type
 
 CHANNEL_RE = re.compile(r"(?:https?://)?(?:rubika\.ir/)?(@?[A-Za-z0-9_]+)$")
 CONTENT_REF_RE = re.compile(r"^(.+):([^:]+)$")
@@ -126,7 +126,7 @@ async def _handle_state(event, settings: Settings, user_id: str, text: str) -> b
     state = _STATES.get(user_id)
     if not state:
         return False
-    if text in {"↩️ بازگشت", "/start", "لغو", "cancel"}:
+    if text in {"↩️ بازگشت", "🔙 بازگشت", "/start", "لغو", "cancel"}:
         _clear_state(user_id)
         await send_main(event)
         return True
@@ -223,7 +223,8 @@ async def build_user_bot(settings: Settings):
     async def callbacks(bot, event):
         if is_duplicate_update(event):
             return
-        if getattr(event, "button_id", None) in {"home", "back"}:
+        value = button_id(event)
+        if value in {"home", "back"}:
             user_id = await resolve_user(bot, event)
             if user_id:
                 _clear_state(user_id)
@@ -243,7 +244,7 @@ async def build_user_bot(settings: Settings):
         if not user_id:
             return
         text = update_text(event)
-        if text in {"/start", "شروع", "منو", "menu", "↩️ بازگشت"}:
+        if text in {"/start", "شروع", "منو", "menu", "↩️ بازگشت", "🔙 بازگشت"}:
             _clear_state(user_id)
             await send_main(event)
             return
