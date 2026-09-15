@@ -1,7 +1,7 @@
 from .admin_bot import build_admin_bot as _build_admin_bot
 from .owner_localized import build_owner_bot as _build_owner_bot
 from .user_bot import build_user_bot
-from .common import reply, resolve_user, update_type
+from .common import button_id, reply, resolve_user, update_type
 from ..core.db import SessionFactory
 from ..core.roles import RoleService
 from ..core.models import UserRole
@@ -33,6 +33,35 @@ async def build_admin_bot(settings, account_resolver=None, account_runtime=None)
 
 async def build_owner_bot(settings):
     bot = await _build_owner_bot(settings)
+    from .owner_localized import _settings_option
+
+    # MAXRubika keeps callback handlers in Bot._registry._handlers.
+    # Patch the registered owner callback itself so settings actions are
+    # handled before the legacy generic settings route.
+    registry = getattr(bot, "_registry", None)
+    handlers = getattr(registry, "_handlers", None)
+    if isinstance(handlers, dict):
+        for key, entries in list(handlers.items()):
+            patched = []
+            changed = False
+            for constraints, original in entries:
+                if getattr(original, "__name__", "") != "on_callback":
+                    patched.append((constraints, original))
+                    continue
+
+                async def owner_callback(bot_instance, event, _original=original):
+                    value = button_id(event)
+                    parts = value.split(":") if value else []
+                    if len(parts) == 3 and parts[0] == "settings":
+                        await _settings_option(event, bot_instance, settings, parts[1], parts[2])
+                        return
+                    await _original(bot_instance, event)
+
+                patched.append((constraints, owner_callback))
+                changed = True
+            if changed:
+                handlers[key] = patched
+                break
 
     @bot.on_message()
     async def owner_started(bot, event):
