@@ -14,11 +14,20 @@ class FakeAux:
 
 
 class FakeEvent:
-    def __init__(self, *, message_id="m1", user_guid="u0abc", button_id=None, aux_button_id=None):
+    def __init__(
+        self,
+        *,
+        message_id="m1",
+        user_guid="u0abc",
+        button_id=None,
+        aux_button_id=None,
+        update_type="NewMessage",
+    ):
         self.message_id = message_id
         self.user_guid = user_guid
         self.button_id = button_id
         self.chat_id = "b0bot"
+        self.update_type = update_type
         self.aux_data = FakeAux(aux_button_id) if aux_button_id else None
 
 
@@ -56,7 +65,24 @@ def test_duplicate_update_window_is_idempotent():
     _SEEN_UPDATES.clear()
 
 
-def test_distinct_callback_updates_are_not_deduplicated_by_button():
+def test_inline_callbacks_are_not_deduplicated_by_message_id():
+    _SEEN_UPDATES.clear()
+    first = FakeEvent(
+        message_id="same-message",
+        aux_button_id="settings:lists:status",
+        update_type="InlineMessage",
+    )
+    second = FakeEvent(
+        message_id="same-message",
+        aux_button_id="settings:lists:status",
+        update_type="InlineMessage",
+    )
+    assert is_duplicate_update(first) is False
+    assert is_duplicate_update(second) is False
+    _SEEN_UPDATES.clear()
+
+
+def test_distinct_events_without_ids_are_not_deduplicated_by_button():
     _SEEN_UPDATES.clear()
     first = FakeEvent(message_id=None, aux_button_id="settings:lists:status")
     second = FakeEvent(message_id=None, aux_button_id="settings:lists:status")
