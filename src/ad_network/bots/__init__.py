@@ -1,5 +1,6 @@
 from .admin_bot import build_admin_bot as _build_admin_bot
 from .owner_localized import build_owner_bot as _build_owner_bot
+from .owner_inline import handle as handle_owner_inline_action
 from .user_bot import build_user_bot
 from .common import button_id, reply, resolve_user, update_type
 from ..core.db import SessionFactory
@@ -44,7 +45,6 @@ async def build_admin_bot(settings, account_resolver=None, account_runtime=None)
 async def build_owner_bot(settings):
     bot = await _build_owner_bot(settings)
     from .owner_localized import _settings_option
-    from .owner_callback_actions import handle_owner_inline_action
 
     registry = getattr(bot, "_registry", None)
     handlers = getattr(registry, "_handlers", None)
