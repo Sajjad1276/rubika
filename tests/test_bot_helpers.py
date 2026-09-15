@@ -1,4 +1,11 @@
-from ad_network.bots.common import _SEEN_UPDATES, button_id, inline_keyboard, is_duplicate_update, quick_keyboard, update_user_id
+from ad_network.bots.common import (
+    _SEEN_UPDATES,
+    button_id,
+    inline_keyboard,
+    is_duplicate_update,
+    quick_keyboard,
+    update_user_id,
+)
 
 
 class FakeAux:
@@ -30,9 +37,15 @@ def test_callback_identity_prefers_user_guid():
     assert update_user_id(event) == "u0abc"
 
 
-def test_button_id_reads_aux_data():
+def test_button_id_reads_object_aux_data():
     event = FakeEvent(aux_button_id="settings:lists:status")
     assert button_id(event) == "settings:lists:status"
+
+
+def test_button_id_reads_dict_aux_data():
+    event = FakeEvent()
+    event.aux_data = {"button_id": "settings:ads:execution"}
+    assert button_id(event) == "settings:ads:execution"
 
 
 def test_duplicate_update_window_is_idempotent():
@@ -40,4 +53,13 @@ def test_duplicate_update_window_is_idempotent():
     event = FakeEvent(message_id="same")
     assert is_duplicate_update(event) is False
     assert is_duplicate_update(event) is True
+    _SEEN_UPDATES.clear()
+
+
+def test_distinct_callback_updates_are_not_deduplicated_by_button():
+    _SEEN_UPDATES.clear()
+    first = FakeEvent(message_id=None, aux_button_id="settings:lists:status")
+    second = FakeEvent(message_id=None, aux_button_id="settings:lists:status")
+    assert is_duplicate_update(first) is False
+    assert is_duplicate_update(second) is False
     _SEEN_UPDATES.clear()
