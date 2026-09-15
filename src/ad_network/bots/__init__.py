@@ -18,6 +18,32 @@ class _CallbackProxy:
         return getattr(self._event, name)
 
 
+def _hide_unsupported_worker_control() -> None:
+    """Remove controls that have no executable runtime contract."""
+    from . import owner_localized
+
+    original = owner_localized._clean_keyboard
+
+    def clean(value):
+        value = original(value)
+        if isinstance(value, dict) and isinstance(value.get("rows"), list):
+            rows = []
+            for row in value["rows"]:
+                if not isinstance(row, dict) or not isinstance(row.get("buttons"), list):
+                    rows.append(row)
+                    continue
+                buttons = [b for b in row["buttons"] if not (isinstance(b, dict) and b.get("id") == "emergency:workers")]
+                if buttons:
+                    row = dict(row)
+                    row["buttons"] = buttons
+                    rows.append(row)
+            value = dict(value)
+            value["rows"] = rows
+        return value
+
+    owner_localized._clean_keyboard = clean
+
+
 async def build_admin_bot(settings, account_resolver=None, account_runtime=None):
     bot = await _build_admin_bot(settings, account_resolver, account_runtime)
 
@@ -43,6 +69,7 @@ async def build_admin_bot(settings, account_resolver=None, account_runtime=None)
 
 
 async def build_owner_bot(settings):
+    _hide_unsupported_worker_control()
     bot = await _build_owner_bot(settings)
     from .owner_localized import _settings_option
 
