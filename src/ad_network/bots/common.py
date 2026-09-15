@@ -45,20 +45,35 @@ def button_id(event: Any) -> str:
     return str(value or "")
 
 
+def update_type(event: Any) -> str:
+    return str(first_attr(event, "update_type", "type", default="") or "")
+
+
 def update_key(event: Any) -> str | None:
-    """Return a stable update identity without treating repeated button clicks as duplicates."""
+    """Return a stable update identity for events that actually expose one.
+
+    MAXRubika represents inline-button clicks as ``InlineMessage`` events and
+    exposes the clicked message's ``message_id`` on that event. That ID is the
+    identity of the message containing the keypad, not the click itself. Using
+    it for callback deduplication would make the second click on the same
+    glass button look like a duplicate. Inline callbacks therefore bypass this
+    message-level deduplication unless the SDK supplies an explicit update ID.
+    """
+    event_type = update_type(event)
     update_id = first_attr(event, "update_id", "id", default=None)
     if update_id is not None:
         return f"update:{update_id}"
+
+    if event_type == "InlineMessage":
+        return None
 
     message_id = first_attr(event, "message_id", "msg_id", "message_id_string", default=None)
     author_id = first_attr(event, "author_id", "user_guid", "sender_id", "author_guid", default=None)
     if message_id is not None:
         return f"message:{author_id or '-'}:{message_id}"
 
-    # A callback without an update/message id has no safe idempotency key.
-    # Never deduplicate it solely by button id because two legitimate clicks
-    # on the same button must remain independent.
+    # An event without a stable id has no safe idempotency key. Never
+    # deduplicate it solely by button id because legitimate clicks may repeat.
     return None
 
 
@@ -121,10 +136,6 @@ async def resolve_user(bot: Any, event: Any) -> str | None:
     if username:
         remember_username(str(user_id), str(username))
     return str(user_id)
-
-
-def update_type(event: Any) -> str:
-    return str(first_attr(event, "update_type", "type", default="") or "")
 
 
 def update_text(event: Any) -> str:
