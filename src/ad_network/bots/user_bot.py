@@ -10,7 +10,7 @@ from ..core.models import AuditLog, Channel, ListNetwork, RegistrationSource, Us
 from ..core.payments import prepare_payment
 from ..core.roles import RoleService
 from ..core.services import RegistrationService, TaskService
-from .common import is_duplicate_update, quick_keyboard, reply, resolve_user, update_text
+from .common import is_duplicate_update, quick_keyboard, reply, resolve_user, update_text, update_type
 
 CHANNEL_RE = re.compile(r"(?:https?://)?(?:rubika\.ir/)?(@?[A-Za-z0-9_]+)$")
 CONTENT_REF_RE = re.compile(r"^(.+):([^:]+)$")
@@ -130,13 +130,11 @@ async def _handle_state(event, settings: Settings, user_id: str, text: str) -> b
         _clear_state(user_id)
         await send_main(event)
         return True
-
     name = str(state["state"])
     data = state["data"]
     if not isinstance(data, dict):
         data = {}
         state["data"] = data
-
     if name == "register_channel":
         if not CHANNEL_RE.fullmatch(text):
             await reply(event, "❌ فرمت کانال معتبر نیست. نمونه: @mychannel")
@@ -157,7 +155,6 @@ async def _handle_state(event, settings: Settings, user_id: str, text: str) -> b
         _clear_state(user_id)
         await _finish_register(event, settings, user_id, data)
         return True
-
     if name == "ad_list":
         data["list_code"] = text
         state["state"] = "ad_title"
@@ -200,7 +197,6 @@ async def _handle_state(event, settings: Settings, user_id: str, text: str) -> b
         _clear_state(user_id)
         await _finish_ad(event, settings, user_id, data)
         return True
-
     if name == "status":
         _clear_state(user_id)
         async with SessionFactory() as db:
@@ -211,7 +207,6 @@ async def _handle_state(event, settings: Settings, user_id: str, text: str) -> b
             keypad=main_keyboard(),
         )
         return True
-
     if name == "support":
         _clear_state(user_id)
         await _finish_support(event, settings, user_id, text)
@@ -238,7 +233,13 @@ async def build_user_bot(settings: Settings):
     async def handle(bot, event):
         if is_duplicate_update(event):
             return
+        event_kind = update_type(event)
         user_id = await resolve_user(bot, event)
+        if event_kind == "StartedBot":
+            if user_id:
+                _clear_state(user_id)
+                await send_main(event)
+            return
         if not user_id:
             return
         text = update_text(event)
