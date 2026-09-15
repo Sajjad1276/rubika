@@ -44,6 +44,7 @@ async def build_admin_bot(settings, account_resolver=None, account_runtime=None)
 async def build_owner_bot(settings):
     bot = await _build_owner_bot(settings)
     from .owner_localized import _settings_option
+    from .owner_callback_actions import handle_owner_inline_action
 
     registry = getattr(bot, "_registry", None)
     handlers = getattr(registry, "_handlers", None)
@@ -61,6 +62,8 @@ async def build_owner_bot(settings):
                     parts = value.split(":") if value else []
                     if len(parts) == 3 and parts[0] == "settings":
                         await _settings_option(event, bot_instance, settings, parts[1], parts[2])
+                        return
+                    if await handle_owner_inline_action(event, value):
                         return
                     if value == "back":
                         await _original(bot_instance, _CallbackProxy(event, "dashboard"))
