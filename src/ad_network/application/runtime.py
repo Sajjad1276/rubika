@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sqlalchemy import select
@@ -29,7 +28,7 @@ async def load_active_list_accounts() -> list[ListAccount]:
 
 
 class BotSupervisor:
-    """Own lifecycle, restart policy and shutdown for long-running bot tasks."""
+    """Own lifecycle, restart policy and shutdown for one long-running bot."""
 
     def __init__(
         self,
@@ -56,7 +55,11 @@ class BotSupervisor:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("[%s] polling failed; retrying in %.1fs", self.name, self.retry_delay)
+                logger.exception(
+                    "[%s] polling failed; retrying in %.1fs",
+                    self.name,
+                    self.retry_delay,
+                )
             await self._sleep_or_stop()
 
     async def _sleep_or_stop(self) -> None:
