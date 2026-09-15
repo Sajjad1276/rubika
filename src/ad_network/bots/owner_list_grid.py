@@ -37,7 +37,7 @@ def _header(text: str, callback: str) -> tuple[tuple[str, str], ...]:
 def list_management_keyboard() -> dict[str, Any]:
     rows: list[tuple[tuple[str, str], ...]] = []
     for family, callback in (("12H", "lists:header:12h"), ("6H", "lists:header:6h"), ("VIEW", "lists:header:view")):
-        rows.append(_header(family, callback)[0])
+        rows.append(_header(family, callback))
         kind_key = callback.rsplit(":", 1)[1]
         _, thresholds = LIST_GRID[kind_key]
         buttons = [
