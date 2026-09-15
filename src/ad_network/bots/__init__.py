@@ -35,9 +35,6 @@ async def build_owner_bot(settings):
     bot = await _build_owner_bot(settings)
     from .owner_localized import _settings_option
 
-    # MAXRubika keeps callback handlers in Bot._registry._handlers.
-    # Patch the registered owner callback itself so settings actions are
-    # handled before the legacy generic settings route.
     registry = getattr(bot, "_registry", None)
     handlers = getattr(registry, "_handlers", None)
     if isinstance(handlers, dict):
@@ -54,6 +51,12 @@ async def build_owner_bot(settings):
                     parts = value.split(":") if value else []
                     if len(parts) == 3 and parts[0] == "settings":
                         await _settings_option(event, bot_instance, settings, parts[1], parts[2])
+                        return
+                    if value == "back":
+                        await _original(bot_instance, event)
+                        return
+                    if len(parts) == 3 and parts[0] == "flow" and parts[1] == "back":
+                        await _original(bot_instance, event)
                         return
                     await _original(bot_instance, event)
 
