@@ -67,6 +67,7 @@ class RetentionMonitor:
                 severity=2,
                 note=f"message {target.published_message_id} deleted before retention deadline",
             ))
+            channel.violation_count = (channel.violation_count or 0) + 1
             target.status = "failed"
             strikes = await self.db.scalar(select(func.count(Violation.id)).where(
                 Violation.channel_id == channel.id,
@@ -78,8 +79,6 @@ class RetentionMonitor:
             await self.db.flush()
             return False
 
-        # The retention contract has already been fulfilled. Missing after the
-        # deadline is therefore a successful terminal state, not a new violation.
         target.status = "retained"
         await self.db.flush()
         return True
