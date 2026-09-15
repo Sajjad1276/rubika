@@ -1,8 +1,7 @@
 from __future__ import annotations
-
-import time
 from dataclasses import dataclass
 from typing import Any
+import time
 
 from ..core.roles import remember_username
 
@@ -23,6 +22,29 @@ def first_attr(obj: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
+def _aux_attr(event: Any, *names: str, default: Any = None) -> Any:
+    aux = first_attr(event, "aux_data", default=None)
+    if aux is None:
+        raw = first_attr(event, "raw_data", default=None)
+        if isinstance(raw, dict):
+            aux = raw.get("aux_data") or raw.get("auxData")
+            if isinstance(aux, dict):
+                for name in names:
+                    if aux.get(name) is not None:
+                        return aux[name]
+    if aux is not None:
+        return first_attr(aux, *names, default=default)
+    return default
+
+
+def button_id(event: Any) -> str:
+    direct = first_attr(event, "button_id", "callback_button_id", default=None)
+    if direct:
+        return str(direct)
+    nested = _aux_attr(event, "button_id", "callback_button_id", default=None)
+    return str(nested or "")
+
+
 def update_key(event: Any) -> str | None:
     update_id = first_attr(event, "update_id", "id", default=None)
     if update_id is not None:
@@ -31,7 +53,7 @@ def update_key(event: Any) -> str | None:
     author_id = first_attr(event, "author_id", "user_guid", "sender_id", "author_guid", default=None)
     if message_id is not None:
         return f"message:{author_id or '-'}:{message_id}"
-    button = first_attr(event, "button_id", "callback_button_id", default=None)
+    button = button_id(event)
     if button:
         chat_id = first_attr(event, "chat_id", "chat_guid", "object_guid", default=None)
         return f"button:{chat_id or author_id or '-'}:{button}"
@@ -101,10 +123,6 @@ def update_text(event: Any) -> str:
     return str(first_attr(event, "text", "message_text", default="") or "").strip()
 
 
-def button_id(event: Any) -> str:
-    return str(first_attr(event, "button_id", "callback_button_id", default="") or "")
-
-
 def _add_back_row(rows: tuple[tuple[tuple[str, str], ...], ...]) -> tuple[tuple[tuple[str, str], ...], ...]:
     if any(button in {"home", "back"} or label == "↩️ بازگشت" for row in rows for button, label in row):
         return rows
@@ -145,4 +163,4 @@ async def reply(event: Any, text: str, *, inline_keypad: Any = None, keypad: Any
 @dataclass(frozen=True)
 class BotContext:
     name: str
-    token: str
+    bot: Any
