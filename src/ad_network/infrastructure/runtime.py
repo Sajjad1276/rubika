@@ -9,7 +9,7 @@ from sqlalchemy import select
 from ..core.db import SessionFactory
 from ..core.list_accounts import ListAccountResolver
 from ..core.models import ListAccount
-from ..core.network_worker import NetworkWorker
+from .network_worker import NetworkWorker
 
 logger = logging.getLogger(__name__)
 
