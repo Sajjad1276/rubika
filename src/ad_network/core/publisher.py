@@ -85,12 +85,10 @@ class PublicationService:
         target.status = "published"
         target.published_at = datetime.now(timezone.utc)
         target.published_message_id = message_id
-        await self.db.flush()
         return target
 
     async def mark_failed(self, target: CampaignTarget) -> CampaignTarget:
         target.status = "failed"
-        await self.db.flush()
         return target
 
 
@@ -110,24 +108,13 @@ class RotationPlanner:
 
         if interval_seconds < 1:
             raise ValueError("interval_seconds must be positive")
-        created = await CampaignService(self.db).target_list(
+        return await CampaignService(self.db).target_list(
             campaign,
             list_id,
             channel_count=channel_count,
             start_at=start_at,
             interval_seconds=interval_seconds,
         )
-        targets = list((await self.db.scalars(
-            select(CampaignTarget).where(
-                CampaignTarget.campaign_id == campaign.id,
-                CampaignTarget.list_id == list_id,
-                CampaignTarget.status == "planned",
-            ).order_by(CampaignTarget.channel_id)
-        )).all())
-        for index, target in enumerate(targets):
-            target.planned_at = start_at + timedelta(seconds=index * interval_seconds)
-        await self.db.flush()
-        return created
 
 
 class RotationExecutor:
@@ -159,6 +146,8 @@ class RotationExecutor:
             if not message_id:
                 raise RuntimeError("Rubika forward response did not contain a message id")
             await service.mark_published(target, message_id)
+            channel.last_ad_at = datetime.now(timezone.utc)
+            await self.db.flush()
             return True
         except Exception:
             logger.exception("campaign target publication failed: %s", target.id)
