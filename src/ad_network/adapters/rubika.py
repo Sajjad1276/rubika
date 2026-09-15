@@ -83,6 +83,22 @@ def _nested_mapping(data: Any, *names: str) -> dict[str, Any]:
     return current
 
 
+def _member_list(raw: Any) -> list[Any]:
+    payload = _mapping(raw)
+    candidates = (
+        payload.get("admins"),
+        payload.get("in_chat_members"),
+        payload.get("members"),
+        _nested_mapping(payload, "data").get("admins"),
+        _nested_mapping(payload, "data").get("in_chat_members"),
+        _nested_mapping(payload, "data").get("members"),
+    )
+    for value in candidates:
+        if isinstance(value, list):
+            return value
+    return []
+
+
 class MaxRubikaGateway:
     """Gateway backed by MAXRubika Messenger 1.12.x."""
 
@@ -122,8 +138,7 @@ class MaxRubikaGateway:
             raise RuntimeError("MAXRubika client does not expose channel admin listing")
 
         raw = _raw(await admins_getter(guid))
-        payload = _mapping(raw)
-        members = payload.get("admins") or payload.get("in_chat_members") or payload.get("members") or []
+        members = _member_list(raw)
 
         target = None
         for member in members:
@@ -138,28 +153,41 @@ class MaxRubikaGateway:
         if target is None:
             return AccessSnapshot(user_id=user_id, is_admin=False, can_send=False, can_edit=False, can_delete=False, raw=raw)
 
+        join_type = str(
+            _first_value(target, "join_type", "member_type", "role", "type") or ""
+        ).strip().lower()
+        admin_markers = {"admin", "administrator", "creator", "owner", "moderator"}
+        is_admin = join_type in admin_markers
+
         permissions = target.get("permissions") or target.get("access_list") or []
         access = None
         access_getter = getattr(self.client, "get_channel_admin_access", None)
         if access_getter is None:
             access_getter = getattr(self.client, "get_admin_access_list", None)
-        if access_getter is not None:
+        if access_getter is not None and is_admin:
             access = _raw(await access_getter(guid, user_id))
             access_payload = _mapping(access)
-            permissions = access_payload.get("access_list") or access_payload.get("permissions") or permissions
+            permissions = (
+                access_payload.get("access_list")
+                or access_payload.get("permissions")
+                or permissions
+            )
 
         if isinstance(permissions, dict):
             permissions = [key for key, value in permissions.items() if value]
-        permissions = {str(permission).replace("_", "").replace(" ", "").lower() for permission in permissions}
+        if not isinstance(permissions, (list, tuple, set)):
+            permissions = [permissions]
+        permissions = {
+            str(permission).replace("_", "").replace(" ", "").lower()
+            for permission in permissions
+        }
 
         send_names = {"send", "write", "post", "sendmessages", "sendmessage"}
         edit_names = {"edit", "editmessage", "editmessages", "posteditdeletemessage"}
         delete_names = {"delete", "deletemessage", "deletemessages", "posteditdeletemessage"}
-        can_send = bool(send_names & permissions)
-        can_edit = bool(edit_names & permissions)
-        can_delete = bool(delete_names & permissions)
-        join_type = str(target.get("join_type", "")).lower()
-        is_admin = join_type in {"admin", "creator"} or bool(target)
+        can_send = is_admin and bool(send_names & permissions)
+        can_edit = is_admin and bool(edit_names & permissions)
+        can_delete = is_admin and bool(delete_names & permissions)
 
         return AccessSnapshot(
             user_id=user_id,
@@ -183,5 +211,4 @@ class MaxRubikaGateway:
         return await self.client.get_messages_by_id(object_guid, [message_id])
 
 
-# Compatibility alias for internal imports from earlier versions.
 FastRubikaGateway = MaxRubikaGateway
