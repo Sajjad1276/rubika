@@ -91,7 +91,7 @@ class NetworkWorker:
 
     async def _reconcile_campaigns(self, db) -> None:
         campaigns = await db.scalars(
-            select(Campaign).where(Campaign.status.in_(["scheduled", "active"]))
+            select(Campaign).where(Campaign.status.in_(["scheduled", "active", "paused"]))
         )
         for campaign in campaigns.all():
             targets = list((await db.scalars(
@@ -100,10 +100,13 @@ class NetworkWorker:
             if not targets:
                 continue
             statuses = {target.status for target in targets}
-            if statuses == {"retained"}:
-                campaign.status = "completed"
+            terminal = {"retained", "failed"}
+            if statuses and statuses <= terminal:
+                campaign.status = "completed" if "retained" in statuses else "failed"
             elif any(status in {"published", "retained", "running"} for status in statuses):
                 campaign.status = "active"
+            elif campaign.status == "scheduled" and any(status == "planned" for status in statuses):
+                campaign.status = "scheduled"
 
     async def _account_for_list(self, db, list_id: str) -> ListAccount | None:
         return await db.scalar(
