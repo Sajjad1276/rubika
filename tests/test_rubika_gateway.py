@@ -11,6 +11,7 @@ class FakeClient:
         return {
             "admins": [
                 {"member_guid": "u-1", "join_type": "Admin"},
+                {"member_guid": "u-2", "join_type": "Member"},
             ]
         }
 
@@ -44,6 +45,16 @@ async def test_channel_snapshot_and_real_permissions():
     assert access.can_send is True
     assert access.can_edit is True
     assert access.can_delete is True
+
+
+@pytest.mark.asyncio
+async def test_non_admin_member_fails_closed():
+    gateway = MaxRubikaGateway(FakeClient())
+    access = await gateway.verify_channel_access("c-1", "u-2")
+    assert access.is_admin is False
+    assert access.can_send is False
+    assert access.can_edit is False
+    assert access.can_delete is False
 
 
 @pytest.mark.asyncio
