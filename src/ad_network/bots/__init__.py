@@ -1,5 +1,5 @@
 from .admin_bot import build_admin_bot as _build_admin_bot
-from .owner_bot import build_owner_bot as _build_owner_bot
+from .owner_localized import build_owner_bot as _build_owner_bot
 from .user_bot import build_user_bot
 from .common import reply, resolve_user, update_type
 from ..core.db import SessionFactory
@@ -49,8 +49,8 @@ async def build_owner_bot(settings):
                 await reply(event, "⛔ دسترسی ندارید.")
                 return
             await db.commit()
-        from .owner_bot import owner_keyboard
-        await reply(event, "👑 OPEX CONTROL CENTER", keypad=owner_keyboard())
+        from .owner_localized import localized_owner_keyboard
+        await reply(event, "👑 مرکز فرماندهی اوپکس", keypad=localized_owner_keyboard())
 
     return bot
 
