@@ -9,12 +9,13 @@ class FakeEvent:
         self.chat_id = "b0bot"
 
 
-def test_keyboard_builders_keep_rows_and_back_button():
+def test_keyboard_builders_keep_rows_and_root_without_back_button():
     inline = inline_keyboard((("a", "A"), ("b", "B")), (("c", "C"),))
     quick = quick_keyboard((("a", "A"),))
     assert len(inline["rows"]) == 3
     assert inline["rows"][-1]["buttons"][0]["id"] == "home"
-    assert quick["rows"][-1]["buttons"][0]["button_text"] == "↩️ بازگشت"
+    assert len(quick["rows"]) == 1
+    assert quick["rows"][-1]["buttons"][0]["button_text"] == "A"
 
 
 def test_callback_identity_prefers_user_guid():
