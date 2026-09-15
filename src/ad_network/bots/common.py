@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any
 import time
@@ -124,9 +125,9 @@ def update_text(event: Any) -> str:
 
 
 def _add_back_row(rows: tuple[tuple[tuple[str, str], ...], ...]) -> tuple[tuple[tuple[str, str], ...], ...]:
-    if any(button in {"home", "back"} or label == "↩️ بازگشت" for row in rows for button, label in row):
+    if any(button in {"back", "home"} or label in {"↩️ بازگشت", "🔙 بازگشت"} for row in rows for button, label in row):
         return rows
-    return (*rows, (("home", "↩️ بازگشت"),))
+    return (*rows, (("back", "🔙 بازگشت"),))
 
 
 def _keyboard(rows: tuple[tuple[tuple[str, str], ...], ...], *, add_back: bool) -> dict[str, Any]:
