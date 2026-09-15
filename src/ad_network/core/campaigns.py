@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -10,6 +12,7 @@ from .models import Base, Channel, ChannelStatus, ListNetwork, Operation, Operat
 
 class Campaign(Base):
     __tablename__ = "campaigns"
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     order_id: Mapped[str | None] = mapped_column(ForeignKey("ad_orders.id"), unique=True, index=True)
     title: Mapped[str] = mapped_column(String(255))
@@ -22,6 +25,7 @@ class Campaign(Base):
 
 class CampaignTarget(Base):
     __tablename__ = "campaign_targets"
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), index=True)
     list_id: Mapped[str] = mapped_column(ForeignKey("lists.id"), index=True)
@@ -34,8 +38,14 @@ class CampaignTarget(Base):
     __table_args__ = (UniqueConstraint("campaign_id", "channel_id", name="uq_campaign_channel"),)
 
 
+def _utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 class CampaignService:
-    """Creates deterministic publish targets; transport is handled by the Rubika adapter."""
+    """Application use cases for campaign creation and deterministic targeting."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -49,12 +59,20 @@ class CampaignService:
         retention_hours: int = 6,
         order_id: str | None = None,
     ) -> Campaign:
+        title = title.strip()
+        content_ref = content_ref.strip()
+        if not title:
+            raise ValueError("title must not be empty")
+        if not content_ref or ":" not in content_ref:
+            raise ValueError("content_ref must contain a source guid and message id")
         if retention_hours <= 0:
             raise ValueError("retention_hours must be positive")
+
         if order_id:
             existing = await self.db.scalar(select(Campaign).where(Campaign.order_id == order_id))
             if existing:
                 return existing
+
         campaign = Campaign(
             order_id=order_id,
             title=title,
@@ -80,47 +98,80 @@ class CampaignService:
             raise ValueError("Active list not found")
         if channel_count is not None and channel_count <= 0:
             raise ValueError("channel_count must be positive")
-        if interval_seconds < 1:
+        if interval_seconds <= 0:
             raise ValueError("interval_seconds must be positive")
 
-        query = select(Channel).where(
-            Channel.list_id == list_id,
-            Channel.status == ChannelStatus.ACTIVE,
-        ).order_by(Channel.list_code, Channel.id)
+        query = (
+            select(Channel)
+            .where(Channel.list_id == list_id, Channel.status == ChannelStatus.ACTIVE)
+            .order_by(Channel.list_code, Channel.id)
+        )
         if channel_count is not None:
             query = query.limit(channel_count)
-        channels = (await self.db.scalars(query)).all()
+        channels = list((await self.db.scalars(query)).all())
 
         if channel_count is not None and len(channels) < channel_count:
             raise ValueError(
                 f"List has only {len(channels)} active channels; {channel_count} required"
             )
+        if not channels:
+            return 0
 
-        base_time = start_at or datetime.now(timezone.utc)
+        channel_ids = [channel.id for channel in channels]
+        existing_ids = set(
+            (
+                await self.db.scalars(
+                    select(CampaignTarget.channel_id).where(
+                        CampaignTarget.campaign_id == campaign.id,
+                        CampaignTarget.channel_id.in_(channel_ids),
+                    )
+                )
+            ).all()
+        )
+
+        base_time = _utc(start_at) if start_at else datetime.now(timezone.utc)
         created = 0
         for index, channel in enumerate(channels):
-            exists = await self.db.scalar(select(CampaignTarget.id).where(
-                CampaignTarget.campaign_id == campaign.id,
-                CampaignTarget.channel_id == channel.id,
-            ))
-            if exists:
+            if channel.id in existing_ids:
                 continue
-            self.db.add(CampaignTarget(
-                campaign_id=campaign.id,
-                list_id=list_id,
-                channel_id=channel.id,
-                planned_at=base_time + timedelta(seconds=index * interval_seconds),
-            ))
+            self.db.add(
+                CampaignTarget(
+                    campaign_id=campaign.id,
+                    list_id=list_id,
+                    channel_id=channel.id,
+                    planned_at=base_time + timedelta(seconds=index * interval_seconds),
+                )
+            )
             created += 1
-        await self.db.flush()
+
+        if created:
+            await self.db.flush()
         return created
 
-    async def plan_operation(self, *, list_id: str, scheduled_at: datetime, idempotency_key: str) -> Operation:
-        existing = await self.db.scalar(select(Operation).where(Operation.idempotency_key == idempotency_key))
+    async def plan_operation(
+        self,
+        *,
+        list_id: str,
+        scheduled_at: datetime,
+        idempotency_key: str,
+    ) -> Operation:
+        idempotency_key = idempotency_key.strip()
+        if not idempotency_key:
+            raise ValueError("idempotency_key must not be empty")
+
+        existing = await self.db.scalar(
+            select(Operation).where(Operation.idempotency_key == idempotency_key)
+        )
         if existing:
             return existing
-        operation = Operation(list_id=list_id, operation_type="campaign_publish", status=OperationStatus.PLANNED,
-                              scheduled_at=scheduled_at, idempotency_key=idempotency_key)
+
+        operation = Operation(
+            list_id=list_id,
+            operation_type="campaign_publish",
+            status=OperationStatus.PLANNED,
+            scheduled_at=_utc(scheduled_at),
+            idempotency_key=idempotency_key,
+        )
         self.db.add(operation)
         await self.db.flush()
         return operation
