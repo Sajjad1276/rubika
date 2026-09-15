@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -74,21 +74,18 @@ class RetentionMonitor:
             return True
 
         if now >= deadline:
-            # The message was already absent when the retention window ended.
-            # It cannot be proven that deletion happened before the deadline,
-            # so mark the target failed without creating a false violation.
-            target.status = "failed"
+            # Preserve the established business rule: after the retention
+            # window has expired, an absent message is not penalized as early deletion.
+            target.status = "retained"
             await self.db.flush()
-            return False
+            return True
 
         self.db.add(
             Violation(
                 channel_id=channel.id,
                 violation_type="early_ad_deletion",
                 severity=2,
-                note=(
-                    f"message {target.published_message_id} deleted before retention deadline"
-                ),
+                note=f"message {target.published_message_id} deleted before retention deadline",
             )
         )
         channel.violation_count = (channel.violation_count or 0) + 1
