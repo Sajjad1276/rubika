@@ -16,12 +16,7 @@ def new_id() -> str:
 
 
 def enum_column(enum_cls):
-    return SAEnum(
-        enum_cls,
-        native_enum=False,
-        values_callable=lambda enum: [item.value for item in enum],
-        validate_strings=True,
-    )
+    return SAEnum(enum_cls, native_enum=False, values_callable=lambda enum: [item.value for item in enum], validate_strings=True)
 
 
 class RegistrationSource(StrEnum):
@@ -185,7 +180,7 @@ class Violation(Base):
     severity: Mapped[int] = mapped_column(Integer, default=1)
     note: Mapped[str | None] = mapped_column(Text)
     resolved: Mapped[bool] = mapped_column(default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True, server_default=func.now()))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class AuditLog(Base):
@@ -196,7 +191,7 @@ class AuditLog(Base):
     entity_type: Mapped[str] = mapped_column(String(64))
     entity_id: Mapped[str] = mapped_column(String(36), index=True)
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True, server_default=func.now()))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 if "ad_network.core.campaigns" not in sys.modules:
